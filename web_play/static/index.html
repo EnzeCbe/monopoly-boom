@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepRL Monopoly — Oyna</title>
+<style>
+:root{
+  --board-bg:#f2ead9; --cell-bg:#fbf7ee; --ink:#2a2318; --ink-dim:#6b5f4a;
+  --rule:#cdbfa0; --gold:#a8791f; --center-bg:#e9dfc4; --panel-bg:#fbf7ee;
+  --ok:#2f9e5b; --bad:#d94b3c;
+
+  --brown:#8b5a3c; --lightblue:#a6d8f0; --pink:#e0609f; --orange:#f2a13a;
+  --red:#d94b3c; --yellow:#f3d84e; --green:#2f9e5b; --darkblue:#1e6fa8;
+  --railroad:#3a3530; --utility:#c9c2b3;
+
+  --p0:#c0392b; --p1:#2471a3; --p2:#27824f; --p3:#8e44ad;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --board-bg:#161a15; --cell-bg:#1f251d; --ink:#eee6d4; --ink-dim:#a89d85; --rule:#3a4235; --gold:#e0b355; --center-bg:#202718; --panel-bg:#1f251d; }
+}
+:root[data-theme="dark"]{ --board-bg:#161a15; --cell-bg:#1f251d; --ink:#eee6d4; --ink-dim:#a89d85; --rule:#3a4235; --gold:#e0b355; --center-bg:#202718; --panel-bg:#1f251d; }
+:root[data-theme="light"]{ --board-bg:#f2ead9; --cell-bg:#fbf7ee; --ink:#2a2318; --ink-dim:#6b5f4a; --rule:#cdbfa0; --gold:#a8791f; --center-bg:#e9dfc4; --panel-bg:#fbf7ee; }
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--board-bg);color:var(--ink);font-family:Georgia,serif;}
+.app{max-width:1400px;margin:0 auto;padding:20px;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(320px,1fr);gap:20px;}
+@media (max-width:1000px){.app{grid-template-columns:1fr;}}
+
+h1{font-size:22px;letter-spacing:0.03em;margin:0 0 4px;}
+.sub{font-family:system-ui,sans-serif;font-size:12px;color:var(--ink-dim);margin-bottom:14px;}
+
+.board-shell{background:var(--board-bg);border:1px solid var(--rule);border-radius:6px;padding:10px;}
+.board{display:grid;grid-template-columns:repeat(11,1fr);grid-template-rows:repeat(11,1fr);gap:3px;aspect-ratio:1/1;width:100%;}
+.cell{background:var(--cell-bg);border:1px solid var(--rule);border-radius:3px;position:relative;display:flex;flex-direction:column;overflow:hidden;font-family:system-ui,sans-serif;min-width:0;min-height:0;}
+.band{height:20%;flex:0 0 auto;}
+.cell-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2px 3px;text-align:center;gap:1px;position:relative;}
+.cell-name{font-size:8px;line-height:1.05;font-weight:600;text-wrap:balance;}
+.cell-price{font-family:ui-monospace,Consolas,monospace;font-size:7.5px;color:var(--ink-dim);}
+.cell.corner .cell-name{font-size:10px;font-weight:800;}
+.cell .icon{font-size:11px;line-height:1;}
+.cell.owned{outline:2px solid var(--owner-color);outline-offset:-2px;}
+.cell.mortgaged{opacity:0.5;}
+.houses{position:absolute;top:2px;left:2px;display:flex;gap:1px;}
+.house-dot{width:5px;height:5px;background:#2f9e5b;border-radius:1px;}
+.hotel-dot{width:7px;height:7px;background:#c0392b;border-radius:1px;}
+.tokens{position:absolute;bottom:1px;right:1px;display:flex;gap:1px;flex-wrap:wrap;max-width:20px;}
+.token{width:7px;height:7px;border-radius:50%;border:1px solid rgba(0,0,0,0.3);}
+
+.center{grid-column:2/11;grid-row:2/11;background:var(--center-bg);border:2px solid var(--rule);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:14px;text-align:center;font-family:system-ui,sans-serif;}
+.center .title{font-family:Georgia,serif;font-weight:800;font-size:clamp(16px,2.4vw,26px);color:var(--gold);transform:rotate(-3deg);}
+.center .status{font-size:13px;color:var(--ink-dim);}
+.center .dice{font-size:26px;letter-spacing:6px;}
+.center .winner{font-size:16px;font-weight:700;color:var(--gold);}
+
+.panel{background:var(--panel-bg);border:1px solid var(--rule);border-radius:6px;padding:14px;font-family:system-ui,sans-serif;margin-bottom:16px;}
+.panel h2{font-family:Georgia,serif;font-size:15px;margin:0 0 10px;}
+
+.players{display:flex;flex-direction:column;gap:8px;}
+.player-card{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:5px;border:1px solid var(--rule);}
+.player-card.bankrupt{opacity:0.45;text-decoration:line-through;}
+.player-card.active{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset;}
+.p-dot{width:12px;height:12px;border-radius:50%;flex:0 0 auto;}
+.p-info{flex:1;min-width:0;}
+.p-name{font-size:13px;font-weight:700;}
+.p-stats{font-size:11px;color:var(--ink-dim);font-variant-numeric:tabular-nums;}
+
+.actions{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;}
+.action-btn{font-family:system-ui,sans-serif;font-size:12.5px;text-align:left;padding:8px 10px;border-radius:5px;border:1px solid var(--rule);background:var(--cell-bg);color:var(--ink);cursor:pointer;}
+.action-btn:hover{border-color:var(--gold);}
+.action-btn:active{transform:scale(0.99);}
+.action-btn.primary{border-color:var(--gold);background:color-mix(in srgb, var(--gold) 15%, var(--cell-bg));font-weight:700;}
+.waiting{font-size:12.5px;color:var(--ink-dim);font-style:italic;}
+
+.log{display:flex;flex-direction:column-reverse;gap:2px;max-height:260px;overflow-y:auto;font-size:12px;font-family:ui-monospace,Consolas,monospace;}
+.log div{padding:1px 0;border-bottom:1px dotted var(--rule);}
+
+.controls{display:flex;gap:8px;align-items:center;margin-bottom:14px;font-family:system-ui,sans-serif;font-size:13px;}
+.controls select, .controls button{font-family:system-ui,sans-serif;font-size:13px;padding:7px 10px;border-radius:5px;border:1px solid var(--rule);background:var(--cell-bg);color:var(--ink);cursor:pointer;}
+.controls button{border-color:var(--gold);font-weight:700;}
+</style>
+</head>
+<body>
+<div class="app">
+  <div>
+    <h1>DeepRL Monopoly</h1>
+    <div class="sub">Gerçek motor (monopoly_game_engine) üzerinden oynuyorsun — rakipler sabit-politika botlar.</div>
+    <div class="controls">
+      <label>Oyuncu sayısı:
+        <select id="playerCount"><option>2</option><option>3</option><option selected>4</option></select>
+      </label>
+      <button id="newGameBtn">Yeni Oyun</button>
+    </div>
+    <div class="board-shell"><div class="board" id="board"></div></div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Oyuncular</h2>
+      <div class="players" id="players"></div>
+    </div>
+    <div class="panel">
+      <h2>Sıra sende — yapabileceklerin</h2>
+      <div id="actions"></div>
+    </div>
+    <div class="panel">
+      <h2>Oyun günlüğü</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BOARD = {0:"GO",1:"Mediterranean Avenue",2:"Community Chest",3:"Baltic Avenue",4:"Income Tax",5:"Reading Railroad",6:"Oriental Avenue",7:"Chance",8:"Vermont Avenue",9:"Connecticut Avenue",10:"Jail",11:"St. Charles Place",12:"Electric Company",13:"States Avenue",14:"Virginia Avenue",15:"Pennsylvania Railroad",16:"St. James Place",17:"Community Chest",18:"Tennessee Avenue",19:"New York Avenue",20:"Free Parking",21:"Kentucky Avenue",22:"Chance",23:"Indiana Avenue",24:"Illinois Avenue",25:"B&O Railroad",26:"Atlantic Avenue",27:"Ventnor Avenue",28:"Water Works",29:"Marvin Gardens",30:"Go To Jail",31:"Pacific Avenue",32:"North Carolina Avenue",33:"Community Chest",34:"Pennsylvania Avenue",35:"Short Line Railroad",36:"Chance",37:"Park Place",38:"Luxury Tax",39:"Boardwalk"};
+const PROPS = {
+  1:{price:60,color:"brown"},3:{price:60,color:"brown"},
+  6:{price:100,color:"lightblue"},8:{price:100,color:"lightblue"},9:{price:120,color:"lightblue"},
+  11:{price:140,color:"pink"},13:{price:140,color:"pink"},14:{price:160,color:"pink"},
+  16:{price:180,color:"orange"},18:{price:180,color:"orange"},19:{price:200,color:"orange"},
+  21:{price:220,color:"red"},23:{price:220,color:"red"},24:{price:240,color:"red"},
+  26:{price:260,color:"yellow"},27:{price:260,color:"yellow"},29:{price:280,color:"yellow"},
+  31:{price:300,color:"green"},32:{price:300,color:"green"},34:{price:320,color:"green"},
+  37:{price:350,color:"darkblue"},39:{price:400,color:"darkblue"},
+  5:{price:200,color:"railroad"},15:{price:200,color:"railroad"},25:{price:200,color:"railroad"},35:{price:200,color:"railroad"},
+  12:{price:150,color:"utility"},28:{price:150,color:"utility"}
+};
+const ICONS = {2:"📦",17:"📦",7:"❓",22:"❓",36:"❓",4:"💰",38:"💎",10:"🚔",30:"🚓",20:"🅿️",0:"➡️"};
+const PCOLORS = ["var(--p0)","var(--p1)","var(--p2)","var(--p3)"];
+
+function cellPos(i){
+  if(i===0) return {r:11,c:11};
+  if(i>=1 && i<=9) return {r:11,c:11-i};
+  if(i===10) return {r:11,c:1};
+  if(i>=11 && i<=19) return {r:11-(i-10),c:1};
+  if(i===20) return {r:1,c:1};
+  if(i>=21 && i<=29) return {r:1,c:1+(i-20)};
+  if(i===30) return {r:1,c:11};
+  if(i>=31 && i<=39) return {r:1+(i-30),c:11};
+}
+function isCorner(i){ return [0,10,20,30].includes(i); }
+
+const boardEl = document.getElementById("board");
+const cellEls = {};
+
+function buildBoard(){
+  boardEl.innerHTML = "";
+  for(let i=0;i<40;i++){
+    const pos = cellPos(i);
+    const prop = PROPS[i];
+    const div = document.createElement("div");
+    div.className = "cell" + (isCorner(i) ? " corner" : "");
+    div.style.gridColumn = pos.c;
+    div.style.gridRow = pos.r;
+    let bandHtml = prop ? `<div class="band" style="background:var(--${prop.color})"></div>` : "";
+    let priceHtml = prop ? `<div class="cell-price">$${prop.price}</div>` : (ICONS[i] && !isCorner(i) ? `<div class="icon">${ICONS[i]}</div>` : "");
+    let iconTop = isCorner(i) && ICONS[i] ? `<div class="icon">${ICONS[i]}</div>` : "";
+    div.innerHTML = `${bandHtml}<div class="cell-body"><div class="houses"></div>${iconTop}<div class="cell-name">${BOARD[i]}</div>${priceHtml}<div class="tokens"></div></div>`;
+    boardEl.appendChild(div);
+    cellEls[i] = div;
+  }
+  const center = document.createElement("div");
+  center.className = "center";
+  center.id = "center";
+  center.innerHTML = `<div class="title">DeepRL Monopoly</div><div class="status" id="statusLine">Yükleniyor…</div><div class="dice" id="diceLine"></div><div class="winner" id="winnerLine"></div>`;
+  boardEl.appendChild(center);
+}
+buildBoard();
+
+function render(state){
+  if(!state.started) return;
+
+  for(let sq=0; sq<40; sq++){
+    const el = cellEls[sq];
+    const body = el.querySelector(".cell-body");
+    const housesEl = el.querySelector(".houses");
+    const tokensEl = el.querySelector(".tokens");
+    el.classList.remove("owned","mortgaged");
+    housesEl.innerHTML = "";
+    if(tokensEl) tokensEl.innerHTML = "";
+    if(state.properties[sq]){
+      const p = state.properties[sq];
+      if(p.owner !== null && p.owner !== undefined){
+        el.classList.add("owned");
+        el.style.setProperty("--owner-color", PCOLORS[p.owner] || "#999");
+      }
+      if(p.mortgaged) el.classList.add("mortgaged");
+      if(p.houses > 0 && p.houses < 5){
+        for(let h=0;h<p.houses;h++){ const d=document.createElement("div"); d.className="house-dot"; housesEl.appendChild(d); }
+      } else if(p.houses === 5){
+        const d=document.createElement("div"); d.className="hotel-dot"; housesEl.appendChild(d);
+      }
+    }
+  }
+  state.players.forEach(pl=>{
+    if(pl.bankrupt) return;
+    const el = cellEls[pl.position];
+    const tokensEl = el && el.querySelector(".tokens");
+    if(tokensEl){
+      const t = document.createElement("div");
+      t.className = "token";
+      t.style.background = PCOLORS[pl.pid] || "#999";
+      t.title = pl.name;
+      tokensEl.appendChild(t);
+    }
+  });
+
+  document.getElementById("statusLine").textContent =
+    state.done ? "Oyun bitti" : `Round ${state.round+1} · ${state.whose_turn_name} sırası (${phaseLabel(state.phase)})`;
+  document.getElementById("diceLine").textContent =
+    (!state.done && state.last_dice && state.last_dice[0]) ? `${state.last_dice[0]} · ${state.last_dice[1]}` : "";
+  document.getElementById("winnerLine").textContent = state.done ? `🏆 Kazanan: ${state.winner}` : "";
+
+  const playersEl = document.getElementById("players");
+  playersEl.innerHTML = "";
+  state.players.forEach(pl=>{
+    const card = document.createElement("div");
+    card.className = "player-card" + (pl.bankrupt ? " bankrupt" : "") + (state.whose_turn===pl.pid && !state.done ? " active" : "");
+    card.innerHTML = `
+      <div class="p-dot" style="background:${PCOLORS[pl.pid]}"></div>
+      <div class="p-info">
+        <div class="p-name">${pl.name}${pl.is_human ? " (sen)" : ""}${pl.in_jail ? " 🔒" : ""}</div>
+        <div class="p-stats">$${pl.cash} · ${pl.properties.length} mülk · net $${pl.net_worth}</div>
+      </div>`;
+    playersEl.appendChild(card);
+  });
+
+  const actionsEl = document.getElementById("actions");
+  actionsEl.innerHTML = "";
+  if(state.done){
+    actionsEl.innerHTML = `<div class="waiting">Oyun bitti — yeni oyun başlat.</div>`;
+  } else if(state.whose_turn !== state.human_pid){
+    actionsEl.innerHTML = `<div class="waiting">${state.whose_turn_name} oynuyor…</div>`;
+  } else if(state.allowed_actions.length === 0){
+    actionsEl.innerHTML = `<div class="waiting">Bekleniyor…</div>`;
+  } else {
+    state.allowed_actions.forEach(a=>{
+      const btn = document.createElement("button");
+      btn.className = "action-btn" + (a.label.startsWith("Zar at") ? " primary" : "");
+      btn.textContent = a.label;
+      btn.onclick = ()=>sendAction(a.id);
+      actionsEl.appendChild(btn);
+    });
+  }
+
+  if(state.incoming_trade){
+    const t = state.incoming_trade;
+    const div = document.createElement("div");
+    div.className = "waiting";
+    div.textContent = `${t.from} teklif gönderdi: verdiği ${t.offered_prop||'-'} + $${t.cash_offered} ↔ istediği ${t.requested_prop||'-'} + $${t.cash_requested}`;
+    actionsEl.prepend(div);
+  }
+
+  const logEl = document.getElementById("log");
+  logEl.innerHTML = "";
+  state.log.slice().reverse().forEach(line=>{
+    const d = document.createElement("div");
+    d.textContent = line;
+    logEl.appendChild(d);
+  });
+}
+
+function phaseLabel(p){
+  return {pre_roll:"zar öncesi", post_roll:"zar sonrası", out_of_turn:"sıra dışı", auction:"açık artırma"}[p] || p;
+}
+
+async function fetchState(){
+  const res = await fetch("/api/state");
+  render(await res.json());
+}
+async function sendAction(id){
+  const res = await fetch("/api/action", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({action:id})});
+  render(await res.json());
+}
+async function newGame(){
+  const n = parseInt(document.getElementById("playerCount").value, 10);
+  const res = await fetch("/api/reset", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({players:n})});
+  render(await res.json());
+}
+document.getElementById("newGameBtn").onclick = newGame;
+
+newGame();
+</script>
+</body>
+</html>

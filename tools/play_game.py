@@ -63,7 +63,7 @@ COMMUNITY_SQUARES = {2, 17, 33}
 class GameLogger:
     def __init__(self, log_path="game_log.txt"):
         self.log_path = log_path
-        self.file = open(log_path, "w", buffering=1)  # line-buffered
+        self.file = open(log_path, "w", buffering=1, encoding="utf-8")  # line-buffered
 
     def log(self, text=""):
         print(text)
