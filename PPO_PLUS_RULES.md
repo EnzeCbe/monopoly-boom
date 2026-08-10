@@ -128,11 +128,13 @@ all outside the legal-action mask and cannot be executed.
   listed mortgage value; a mortgaged property earns no rent for its owner. **Unmortgaging
   costs the mortgage value back plus 10% interest** (`cost = mortgage_value × 1.1`, see
   `_mortgage_actions` in `env.py`) — the traditional interest fee is charged.
-- **Building houses/hotels**: only on an unimproved-tie-broken **complete color group**,
-  only on an unmortgaged property, only while the shared bank supply of **32 houses / 12
-  hotels** has stock left, and only if the player can afford the listed house price for that
-  color tier. There is **no even-building rule** (you don't have to build all properties in
-  a group up evenly) and no separate "building auction" for scarce houses — first affordable
+- **Building houses/hotels**: only on a **complete color group**, only on an unmortgaged
+  property, only while the shared bank supply of **32 houses / 12 hotels** has stock left,
+  and only if the player can afford the listed house price for that color tier. **Even
+  building is enforced**: a property may only be built on if it is currently the
+  least-developed (fewest houses) property in its color group (`_is_least_developed` in
+  `env.py`) — you cannot put a second house on one property while a groupmate still has
+  zero. There is still no separate "building auction" for scarce houses — first affordable
   legal build action wins.
 - **Selling houses/hotels**: sells back to the bank at **half the listed house price**,
   returning the physical piece(s) to the shared supply.
@@ -213,9 +215,10 @@ action space — not oversights:
 
 1. Chance and Community Chest squares have no card effect at all; no shuffled deck exists,
    so Get-Out-of-Jail-Free cards only change hands via bankruptcy transfer, never via a draw.
-2. Houses/hotels require a complete color group to build, but **even-building across the
-   group is not enforced**, and there is **no separate building-auction** for houses when
-   supply is scarce.
+2. Houses/hotels require a complete color group to build, and **even building across the
+   group is enforced** (you must build the least-developed property in the group first —
+   matching traditional rules), but there is still **no separate building-auction** for
+   houses when supply is scarce, unlike the official rulebook's tie-breaking auction.
 3. **Unimproved properties can be sold directly back to the bank** for mortgage value —
    traditional rules only offer mortgaging or player-to-player trades, not a bank buy-back.
 4. Mortgage/building legality is checked **per individual deed**, not by re-verifying every
@@ -388,8 +391,10 @@ yasal-eylem maskesinin dışındadır ve çalıştırılamaz.
 - **Ev/otel inşası**: yalnızca **tam bir renkli grupta**, yalnızca ipotekli olmayan bir
   mülkte, yalnızca paylaşılan banka stoğunda **32 ev / 12 otel** kaldığı sürece ve oyuncu o
   renk kademesi için listelenen ev fiyatını karşılayabiliyorsa mümkündür. **Eşit inşa
-  kuralı yoktur** (bir gruptaki tüm mülkleri eşit şekilde inşa etmeniz gerekmez) ve kıt
-  evler için ayrı bir "inşaat açık artırması" yoktur — karşılanabilir ilk yasal inşa eylemi
+  kuralı uygulanıyor**: bir mülke ancak o mülk grubundaki en az gelişmiş (en az evli) mülk
+  ise inşa yapılabilir (`env.py` içindeki `_is_least_developed`) — bir mülkte ikinci evi
+  yapmadan önce aynı gruptaki diğer tüm mülklerin en az bir ev alması gerekir. Kıt evler
+  için hâlâ ayrı bir "inşaat açık artırması" yoktur — karşılanabilir ilk yasal inşa eylemi
   kazanır.
 - **Ev/otel satma**: bankaya listelenen ev fiyatının **yarısına** geri satılır, fiziksel
   parça(lar) paylaşılan stoğa geri döner.
@@ -471,8 +476,10 @@ gömülmüş basitleştirmelerdir — gözden kaçma değildir:
 1. Şans ve Kamu Fonu karelerinin hiçbir kart etkisi yoktur; karıştırılmış bir deste
    bulunmadığından, Hapisten Çıkış Kartları yalnızca iflas devriyle el değiştirir, asla bir
    çekilişle değil.
-2. Ev/otel inşası için tam bir renkli grup gerekir, ancak **grup genelinde eşit inşa
-   zorunlu değildir** ve stok kıtken evler için ayrı bir **inşaat açık artırması yoktur**.
+2. Ev/otel inşası için tam bir renkli grup gerekir ve **grup genelinde eşit inşa
+   uygulanır** (önce grubun en az gelişmiş mülküne inşa etmelisiniz — geleneksel kurala
+   uygun), ancak stok kıtken evler için hâlâ ayrı bir **inşaat açık artırması yoktur** —
+   resmi kural kitabındaki eşitlik-bozma açık artırmasının aksine.
 3. **Geliştirilmemiş mülkler doğrudan bankaya ipotek değerinden geri satılabilir** —
    geleneksel kurallar yalnızca ipotek veya oyuncular arası takas sunar, bankaya geri
    satım sunmaz.
