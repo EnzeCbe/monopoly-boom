@@ -34,6 +34,7 @@ from .constants import (
     INCOME_TAX_SQUARE,
     JAIL_BAIL,
     JAIL_SQUARE,
+    LIQUIDITY_RISK_WEIGHT,
     LUXURY_TAX_SQUARE,
     MAX_HOUSES,
     MAX_JAIL_TURNS,
@@ -1044,6 +1045,42 @@ class MonopolyEnv:
             for s in squares:
                 self.properties[s].is_monopoly = is_mono
 
+    def _liquidity_risk(self, pid: int) -> float:
+        """
+        Own formula, not derived from ASU_FROZEN_TEACHER: how exposed this
+        player is to rent on their very next roll, weighed against how much
+        cash they could actually raise right now.
+
+        next_turn_rent_exposure = average of the top-3 rents payable among
+        the 11 squares reachable on the next roll (dice totals 2-12).
+        safety_buffer = cash + half the mortgage value of unmortgaged deeds
+        (a rough "what I could raise in an emergency" estimate).
+        """
+        player = self.players[pid]
+        pos = player.position
+
+        exposures = []
+        for offset in range(2, 13):
+            sq = (pos + offset) % 40
+            prop = self.properties.get(sq)
+            if prop is None or prop.owner is None or prop.owner == pid:
+                continue
+            owner = self.players[prop.owner]
+            rent = prop.get_rent(offset, owner.railroads_owned(), owner.utilities_owned())
+            if rent > 0:
+                exposures.append(rent)
+        exposures.sort(reverse=True)
+        top = exposures[:3]
+        next_turn_rent_exposure = sum(top) / len(top) if top else 0.0
+
+        unmortgaged_deed_value = sum(
+            p.mortgage_v for p in player.properties if not p.mortgaged
+        )
+        safety_buffer = player.cash + 0.5 * unmortgaged_deed_value
+
+        risk = max(0.0, next_turn_rent_exposure - safety_buffer) / STARTING_CASH
+        return min(risk, 1.0)
+
     def _compute_reward(self, pid: int) -> float:
         """Bounded net-worth potential used for decision-to-decision shaping."""
         if self.players[pid].bankrupt:
@@ -1059,13 +1096,9 @@ class MonopolyEnv:
             if player.player_id != pid
         ]
         mean_other = float(np.mean(others))
-        return float(
-            np.clip(
-                (own - mean_other) / (abs(own) + abs(mean_other) + 1e-9),
-                -1.0,
-                1.0,
-            )
-        )
+        potential = (own - mean_other) / (abs(own) + abs(mean_other) + 1e-9)
+        potential -= LIQUIDITY_RISK_WEIGHT * self._liquidity_risk(pid)
+        return float(np.clip(potential, -1.0, 1.0))
 
     def _check_game_over(self):
         active = [p for p in self.players if not p.bankrupt]

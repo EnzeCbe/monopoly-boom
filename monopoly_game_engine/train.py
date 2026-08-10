@@ -32,7 +32,7 @@ import numpy as np
 import torch
 
 from .actions import ActionType
-from .agents_fixed import FixedPolicyAgent, FPAgentA, FPAgentB, FPAgentC
+from .agents_fixed import FixedPolicyAgent, TheBuilder, TheDealMaker
 from .constants import NUM_PLAYERS
 from .env import MonopolyEnv
 
@@ -310,7 +310,10 @@ def train(
     env = MonopolyEnv(agent_ids=[agent_pid], max_rounds=200)
 
     other_pids = [i for i in range(NUM_PLAYERS) if i != agent_pid]
-    fp_classes = [FPAgentA, FPAgentB, FPAgentC]
+    # Opponent pool: TheBuilder + TheDealMaker, the two strongest fixed
+    # policies (62.5% / 55.4% winrate in an internal round-robin). Builder
+    # takes the extra third seat since it's the stronger of the two.
+    fp_classes = [TheBuilder, TheDealMaker, TheBuilder]
     fp_agents = [fp_classes[i](other_pids[i]) for i in range(3)]
 
     history = defaultdict(list)
@@ -440,9 +443,9 @@ def evaluate(
     env = MonopolyEnv(agent_ids=[agent_pid], max_rounds=200)
     other_pids = [i for i in range(NUM_PLAYERS) if i != agent_pid]
     fp_agents = [
-        FPAgentA(other_pids[0]),
-        FPAgentB(other_pids[1]),
-        FPAgentC(other_pids[2]),
+        TheBuilder(other_pids[0]),
+        TheDealMaker(other_pids[1]),
+        TheBuilder(other_pids[2]),
     ]
 
     all_wins = []
