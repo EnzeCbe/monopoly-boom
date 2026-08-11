@@ -37,6 +37,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from .actions import ACTION_SPACE_SIZE, OFFSETS, ActionType
+from .agents_fixed import _buy_trade_action, _exchange_action, _sell_trade_action
 from .constants import (
     COLOR_GROUPS,
     JAIL_BAIL,
@@ -128,6 +129,73 @@ def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
             return hotel_action
         if house_action in allowed:
             return house_action
+    return None
+
+
+def fixed_trade_offer_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own trade-initiation heuristic, mixing Builder's + DealMaker's core
+    trade traits (both are our own fixed agents — no ASU constraint):
+    bargain buy-offer for a one-piece-from-monopoly colour group, exchange
+    a non-monopoly prop for a needed piece, or sell spare non-monopoly
+    props at a premium. Returns None if nothing worthwhile is legal right
+    now (the neural net picks something else that turn).
+    """
+    others = [
+        i for i in range(NUM_PLAYERS) if i != pid and not env.players[i].bankrupt
+    ]
+    if not others:
+        return None
+
+    # 1. Bargain buy-offer (0.75x) for a colour group we're one piece from completing
+    for color, group in COLOR_GROUPS.items():
+        if color in ("railroad", "utility"):
+            continue
+        owned = [s for s in group if env.properties[s].owner == pid]
+        need = [
+            s
+            for s in group
+            if env.properties[s].owner not in (pid, None)
+            and not env.players[env.properties[s].owner].bankrupt
+        ]
+        if len(owned) + 1 == len(group) and need:
+            sq = need[0]
+            target = env.properties[sq].owner
+            action = _buy_trade_action(pid, target, sq, 0, env, allowed)
+            if action is not None:
+                return action
+
+    # 2. Exchange a non-monopoly prop of ours for a needed piece
+    for color, group in COLOR_GROUPS.items():
+        if color in ("railroad", "utility"):
+            continue
+        owned_here = [s for s in group if env.properties[s].owner == pid]
+        if not owned_here:
+            continue
+        need = [
+            s
+            for s in group
+            if env.properties[s].owner not in (pid, None)
+            and not env.players[env.properties[s].owner].bankrupt
+        ]
+        for req_sq in need:
+            target = env.properties[req_sq].owner
+            for offer_sq in owned_here:
+                if env.properties[offer_sq].is_monopoly:
+                    continue
+                action = _exchange_action(pid, target, offer_sq, req_sq, env, allowed)
+                if action is not None:
+                    return action
+
+    # 3. Sell spare non-monopoly, unbuilt props at a premium (1.25x)
+    for sq in PROPERTY_IDS:
+        prop = env.properties[sq]
+        if prop.owner != pid or prop.is_monopoly or prop.houses > 0:
+            continue
+        for target in others:
+            action = _sell_trade_action(pid, target, sq, 2, env, allowed)
+            if action is not None:
+                return action
+
     return None
 
 
@@ -226,6 +294,7 @@ class PPOAgent:
             self.fixed_action_mask[int(ActionType.BUY_PROPERTY)] = True
             self.fixed_action_mask[int(ActionType.ACCEPT_TRADE)] = True
             self.fixed_action_mask[OFFSETS["improve_house"]:OFFSETS["sell_house"]] = True
+            self.fixed_action_mask[OFFSETS["buy_trade"]:OFFSETS["auction"]] = True
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -266,6 +335,13 @@ class PPOAgent:
             build_action = fixed_build_decision(env, pid, allowed_actions)
             if build_action is not None:
                 return build_action, None, None, allowed_actions
+
+        # Hybrid: handle trade-offer initiation (Builder+DealMaker mix —
+        # see fixed_trade_offer_decision docstring)
+        if self.hybrid:
+            offer_action = fixed_trade_offer_decision(env, pid, allowed_actions)
+            if offer_action is not None:
+                return offer_action, None, None, allowed_actions
 
         # Filter out fixed-policy actions from neural net consideration
         nn_allowed = [a for a in allowed_actions if not self.fixed_action_mask[a]]
