@@ -42,6 +42,7 @@ from .constants import (
     JAIL_BAIL,
     NUM_PLAYERS,
     PROPERTY_IDS,
+    REAL_ESTATE_IDS,
     RULESET_VERSION,
     TRADE_CASH_LEVELS,
 )
@@ -68,7 +69,11 @@ def fixed_buy_decision(env, pid: int) -> bool:
         if owned + 1 == len(group):
             return True
 
-    return player.cash >= prop.price + 100
+    # Orange squares (St. James/Tennessee/New York) sit 6-9 spaces past Jail,
+    # the most common post-bail dice roll — statistically the most-landed-on
+    # group on the board. Buy with a thinner cash buffer than usual.
+    buffer = 20 if color == "orange" else 100
+    return player.cash >= prop.price + buffer
 
 
 def fixed_accept_trade_decision(env, pid: int) -> bool:
@@ -90,7 +95,40 @@ def fixed_accept_trade_decision(env, pid: int) -> bool:
                 return True
 
     nwo = offer.net_worth()
-    return nwo >= 0
+    if nwo < 0:
+        return False
+
+    # Cash-floor safety: a nominally fair/good deal that drains cash below
+    # a survivable buffer can still bankrupt us on the very next rent hit.
+    player = env.players[pid]
+    if player.cash - offer.cash_requested < 100:
+        return False
+
+    return True
+
+
+def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own build heuristic (not derived from any fixed agent's code): build
+    on any owned monopoly once cash allows, hotel-before-house, cheapest
+    group first. Even-building legality is already enforced upstream by
+    env's allowed-action list, so we only need to pick among what's legal.
+    """
+    player = env.players[pid]
+    build_floor = 100
+    for i, sq in enumerate(REAL_ESTATE_IDS):
+        prop = env.properties[sq]
+        if prop.owner != pid or not prop.is_monopoly:
+            continue
+        house_price = prop.data["house_price"]
+        if player.cash < house_price + build_floor:
+            continue
+        hotel_action = OFFSETS["improve_hotel"] + i
+        house_action = OFFSETS["improve_house"] + i
+        if hotel_action in allowed:
+            return hotel_action
+        if house_action in allowed:
+            return house_action
+    return None
 
 
 # ── Experience buffer ─────────────────────────────────────────────────────────
@@ -187,6 +225,7 @@ class PPOAgent:
         if hybrid:
             self.fixed_action_mask[int(ActionType.BUY_PROPERTY)] = True
             self.fixed_action_mask[int(ActionType.ACCEPT_TRADE)] = True
+            self.fixed_action_mask[OFFSETS["improve_house"]:OFFSETS["sell_house"]] = True
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -220,6 +259,13 @@ class PPOAgent:
                     return int(ActionType.ACCEPT_TRADE), None, None, allowed_actions
                 else:
                     return int(ActionType.DECLINE_TRADE), None, None, allowed_actions
+
+        # Hybrid: handle building (Builder-inspired, own heuristic — see
+        # fixed_build_decision docstring)
+        if self.hybrid:
+            build_action = fixed_build_decision(env, pid, allowed_actions)
+            if build_action is not None:
+                return build_action, None, None, allowed_actions
 
         # Filter out fixed-policy actions from neural net consideration
         nn_allowed = [a for a in allowed_actions if not self.fixed_action_mask[a]]

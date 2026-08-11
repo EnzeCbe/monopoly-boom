@@ -24,7 +24,7 @@ import torch.optim as optim
 from .networks import DDQNNetwork
 from .actions import ACTION_SPACE_SIZE, OFFSETS, ActionType
 from .constants import RULESET_VERSION
-from .agent_ppo import fixed_buy_decision, fixed_accept_trade_decision
+from .agent_ppo import fixed_buy_decision, fixed_accept_trade_decision, fixed_build_decision
 from .state import STATE_DIM
 
 
@@ -163,6 +163,9 @@ class DDQNAgent:
         if hybrid:
             self.fixed_actions.add(int(ActionType.BUY_PROPERTY))
             self.fixed_actions.add(int(ActionType.ACCEPT_TRADE))
+            self.fixed_actions.update(
+                range(OFFSETS["improve_house"], OFFSETS["sell_house"])
+            )
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -187,6 +190,12 @@ class DDQNAgent:
                 if fixed_accept_trade_decision(env, pid):
                     return int(ActionType.ACCEPT_TRADE), None
                 return int(ActionType.DECLINE_TRADE), None
+
+        # Hybrid: intercept building (Builder-inspired, own heuristic)
+        if self.hybrid:
+            build_action = fixed_build_decision(env, pid, allowed_actions)
+            if build_action is not None:
+                return build_action, None
 
         # NN actions only
         nn_allowed = [a for a in allowed_actions if a not in self.fixed_actions]
