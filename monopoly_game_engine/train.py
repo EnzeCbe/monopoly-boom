@@ -23,6 +23,7 @@ Fix 5 – bounded potential shaping replaces repeated absolute state rewards.
     This prevents policies from earning reward merely by taking extra actions.
 """
 
+import csv
 import random
 from collections import defaultdict
 from pathlib import Path
@@ -32,7 +33,7 @@ import numpy as np
 import torch
 
 from .actions import ActionType
-from .agents_fixed import FixedPolicyAgent, TheBuilder, TheDealMaker
+from .agents_fixed import FixedPolicyAgent, TheBuilder, TheDealMaker, TheHoarder
 from .constants import NUM_PLAYERS
 from .env import MonopolyEnv
 
@@ -296,6 +297,7 @@ def train(
     checkpoint_every: int = 0,
     checkpoint_path: str | None = None,
     watchdog=None,
+    log_path: str | None = None,
 ) -> Dict:
     """
     Main training function.
@@ -310,11 +312,36 @@ def train(
     env = MonopolyEnv(agent_ids=[agent_pid], max_rounds=200)
 
     other_pids = [i for i in range(NUM_PLAYERS) if i != agent_pid]
-    # Opponent pool: TheBuilder + TheDealMaker, the two strongest fixed
-    # policies (62.5% / 55.4% winrate in an internal round-robin). Builder
-    # takes the extra third seat since it's the stronger of the two.
-    fp_classes = [TheBuilder, TheDealMaker, TheBuilder]
+    # Opponent pool: TheBuilder + TheDealMaker (strongest two fixed
+    # policies, 62.5% / 55.4% winrate in an internal round-robin) plus
+    # TheHoarder as a softer third seat. 2x Builder+DealMaker gave 0/2000
+    # wins over a full run even at eps=0.368 — table was too hard for any
+    # win signal to reach the learner. Hoarder gives a beatable seat.
+    fp_classes = [TheBuilder, TheDealMaker, TheHoarder]
     fp_agents = [fp_classes[i](other_pids[i]) for i in range(3)]
+
+    game_log_writer = None
+    game_log_file = None
+    if log_path:
+        log_file_path = Path(log_path)
+        log_file_path.parent.mkdir(parents=True, exist_ok=True)
+        is_new = not log_file_path.exists()
+        game_log_file = open(log_file_path, "a", newline="", encoding="utf-8")
+        game_log_writer = csv.writer(game_log_file)
+        if is_new:
+            game_log_writer.writerow(
+                [
+                    "game",
+                    "won",
+                    "reward",
+                    "steps",
+                    "epsilon",
+                    "properties_acquired",
+                    "trades_initiated",
+                    "trades_accepted",
+                    "trades_declined",
+                ]
+            )
 
     history = defaultdict(list)
     wins_window = 0
@@ -360,6 +387,23 @@ def train(
         result = run_episode(env, learning_agent, fp_agents, agent_pid, is_ppo)
         games_completed = game_num
         learning_agent.games_trained = absolute_game
+
+        if game_log_writer is not None:
+            eps_val = getattr(learning_agent, "epsilon", "")
+            game_log_writer.writerow(
+                [
+                    absolute_game,
+                    int(result["won"]),
+                    f"{result['reward']:.4f}",
+                    result["steps"],
+                    f"{eps_val:.4f}" if eps_val != "" else "",
+                    result["properties_acquired"],
+                    result["trades_initiated"],
+                    result["trades_accepted"],
+                    result["trades_declined"],
+                ]
+            )
+            game_log_file.flush()
 
         if (
             checkpoint_path
@@ -413,6 +457,9 @@ def train(
             window_trades_declined = 0
             window_props_acquired = 0
 
+    if game_log_file is not None:
+        game_log_file.close()
+
     history["resumed_from_games"] = starting_games
     history["games_completed_this_run"] = games_completed
     history["games_completed"] = int(
@@ -445,7 +492,7 @@ def evaluate(
     fp_agents = [
         TheBuilder(other_pids[0]),
         TheDealMaker(other_pids[1]),
-        TheBuilder(other_pids[2]),
+        TheHoarder(other_pids[2]),
     ]
 
     all_wins = []

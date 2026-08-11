@@ -139,6 +139,9 @@ def main():
     if args.resume and not Path(args.out).exists():
         parser.error(f"resume checkpoint does not exist: {args.out}")
     history_path = str(Path(args.out).with_suffix("")) + "_history.json"
+    game_log_path = str(Path(args.out).with_suffix("")) + "_games.csv"
+    if not args.resume and Path(game_log_path).exists():
+        Path(game_log_path).unlink()
     previous_history = None
     if args.resume and Path(history_path).exists():
         with open(history_path) as f:
@@ -150,6 +153,7 @@ def main():
     print(f"  Games     : {args.games}")
     print(f"  Device    : {args.device}")
     print(f"  Save to   : {args.out}")
+    print(f"  Game log  : {game_log_path}")
     print(f"{'=' * 60}\n")
 
     start = time.time()
@@ -171,6 +175,7 @@ def main():
             watchdog=watchdog,
             seed=args.seed,
             resume_path=args.out if args.resume else None,
+            log_path=game_log_path,
         )
     else:
         agent, history = train_ddqn(
@@ -184,6 +189,7 @@ def main():
             watchdog=watchdog,
             seed=args.seed,
             resume_path=args.out if args.resume else None,
+            log_path=game_log_path,
         )
 
     elapsed = time.time() - start
