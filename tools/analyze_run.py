@@ -53,7 +53,7 @@ def main():
         win_rate = sum(int(r["won"]) for r in chunk) / len(chunk) * 100
         avg_reward = statistics.mean(float(r["reward"]) for r in chunk)
         avg_steps = statistics.mean(int(r["steps"]) for r in chunk)
-        avg_props = statistics.mean(int(r["properties_acquired"]) for r in chunk)
+        avg_props = statistics.mean(int(r.get("properties_acquired", 0)) for r in chunk)
         eps_vals = [r["epsilon"] for r in chunk if r.get("epsilon")]
         eps_str = f"{float(eps_vals[-1]):.3f}" if eps_vals else "-"
         print(
