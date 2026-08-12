@@ -44,6 +44,14 @@ def main():
     parser.add_argument("--seed", type=int, default=55)
     parser.add_argument("--checkpoint-every", type=int, default=50)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--warm-start",
+        type=str,
+        default=None,
+        help="Load an existing OUR-OWN checkpoint (e.g. the proxy-table run) as "
+        "the starting point instead of random weights. Pure transfer learning "
+        "within our own model lineage — not ASU-related.",
+    )
     parser.add_argument("--log-every", type=int, default=20)
     args = parser.parse_args()
 
@@ -56,6 +64,10 @@ def main():
         agent = DDQNAgent(player_id=agent_pid, hybrid=True)
     if args.resume and Path(args.out).exists():
         agent.load(args.out)
+    elif args.warm_start:
+        agent.load(args.warm_start)
+        agent.games_trained = 0
+        print(f"Warm-started from {args.warm_start} (games_trained reset to 0 for this table)")
 
     fp_agents = [
         TheBuilder(other_pids[0]),
