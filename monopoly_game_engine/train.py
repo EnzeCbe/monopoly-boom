@@ -47,16 +47,29 @@ def run_episode(
     agent_pid: int,
     is_ppo: bool,
     update_online: bool = True,
+    active_pids: List[int] | None = None,
 ) -> Dict:
     """
     Run one complete game. The learning agent occupies position agent_pid,
     fixed-policy agents fill the other three slots.
+
+    active_pids: if given, every player NOT in this list is force-marked
+    bankrupt before the game starts (never plays a turn) — used to run a
+    heads-up 1v1 (or 3-player) game inside the same 4-seat engine, e.g.
+    agent_pid vs a single ASU opponent.
 
     Returns metrics dict including:
       won, reward, steps, stats,
       trades_initiated, trades_accepted, trades_declined, properties_acquired
     """
     state = env.reset()
+    if active_pids is not None:
+        for pid in range(NUM_PLAYERS):
+            if pid not in active_pids:
+                env.players[pid].bankrupt = True
+        env.turn_order = [pid for pid in env.turn_order if pid in active_pids]
+        env._skip_bankrupt()
+        state = env._get_state(agent_pid)
     done = False
     total_reward = 0.0
     steps = 0
