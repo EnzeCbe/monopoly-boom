@@ -20,6 +20,7 @@ from .config import SearchConfig
 from .contracts import SearchResult
 from .engine import (
     ACTION_SPACE_SIZE,
+    OFFSETS,
     ROOT,
     RULESET_VERSION,
     STATE_DIM,
@@ -28,7 +29,12 @@ from .engine import (
 )
 from .model import MonopolyZeroNet
 from .search import MaxNPUCT
-from monopoly_game_engine.agent_ppo import fixed_accept_trade_decision, fixed_buy_decision
+from monopoly_game_engine.agent_ppo import (
+    fixed_accept_trade_decision,
+    fixed_build_decision,
+    fixed_buy_decision,
+    fixed_trade_offer_decision,
+)
 from monopoly_game_engine.agents_fixed import FP_AGENT_CLASSES
 from monopoly_game_engine.networks import ActorNetwork
 
@@ -129,11 +135,21 @@ class PPOAdapter:
                 else int(ActionType.DECLINE_TRADE)
             )
             return ActionDecision(action, time.perf_counter() - started)
+        if self.hybrid:
+            build_action = fixed_build_decision(env, player_id, legal)
+            if build_action is not None:
+                return ActionDecision(build_action, time.perf_counter() - started)
+            offer_action = fixed_trade_offer_decision(env, player_id, legal)
+            if offer_action is not None:
+                return ActionDecision(offer_action, time.perf_counter() - started)
 
         neural_legal = tuple(
             action
             for action in legal
-            if not self.hybrid or action not in (int(ActionType.BUY_PROPERTY), int(ActionType.ACCEPT_TRADE))
+            if not self.hybrid
+            or action not in (int(ActionType.BUY_PROPERTY), int(ActionType.ACCEPT_TRADE))
+            and not (OFFSETS["improve_house"] <= action < OFFSETS["sell_house"])
+            and not (OFFSETS["buy_trade"] <= action < OFFSETS["auction"])
         )
         if not neural_legal:
             raise RuntimeError("PPO baseline has no neural legal action")

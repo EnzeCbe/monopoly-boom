@@ -255,7 +255,8 @@ class PPOAgent:
         n_epochs: int = 4,
         batch_size: int = 64,
         hidden_dim: int = 256,
-        win_loss_bonus: float = 1.0,
+        win_loss_bonus: float = 10.0,  # matches DDQN's paper constant c=10 — was 1.0,
+        # too weak vs the dense potential-shaping reward to make winning matter
         device: str = "auto",
     ):
         self.player_id = player_id
