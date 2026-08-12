@@ -26,6 +26,7 @@ from .actions import ACTION_SPACE_SIZE, OFFSETS, ActionType
 from .constants import RULESET_VERSION
 from .agent_ppo import (
     fixed_accept_trade_decision,
+    fixed_auction_decision,
     fixed_build_decision,
     fixed_buy_decision,
     fixed_jail_decision,
@@ -177,6 +178,9 @@ class DDQNAgent:
             )
             self.fixed_actions.add(int(ActionType.PAY_BAIL))
             self.fixed_actions.add(int(ActionType.USE_GOOJ_CARD))
+            self.fixed_actions.update(
+                range(OFFSETS["auction"], OFFSETS["auction"] + 5)
+            )
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -219,6 +223,12 @@ class DDQNAgent:
             jail_action = fixed_jail_decision(env, pid, allowed_actions)
             if jail_action is not None:
                 return jail_action, None
+
+        # Hybrid: auction bidding (own bid-shading heuristic)
+        if self.hybrid:
+            auction_action = fixed_auction_decision(env, pid, allowed_actions)
+            if auction_action is not None:
+                return auction_action, None
 
         # NN actions only
         nn_allowed = [a for a in allowed_actions if a not in self.fixed_actions]

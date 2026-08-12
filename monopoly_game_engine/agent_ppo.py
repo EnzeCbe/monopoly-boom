@@ -36,7 +36,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .actions import ACTION_SPACE_SIZE, OFFSETS, ActionType
+from .actions import (
+    ACTION_SPACE_SIZE,
+    AUCTION_ACTION_TO_INCREMENT,
+    OFFSETS,
+    ActionType,
+    AuctionAction,
+)
 from .agents_fixed import _buy_trade_action, _exchange_action, _sell_trade_action
 from .constants import (
     COLOR_GROUPS,
@@ -130,6 +136,45 @@ def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
         if house_action in allowed:
             return house_action
     return None
+
+
+def fixed_auction_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own auction heuristic — deliberately smarter than the fixed agents'
+    shared base-class logic (agents_fixed.py's _auction_action always jumps
+    straight to the max legal increment when it wants the property, with no
+    price shading). We compute a value ceiling (higher for a monopoly-
+    completing piece) and bid the SMALLEST increment that keeps us above the
+    current high bid, up to that ceiling and a cash-safety floor — real bid
+    shading instead of always maxing out."""
+    prop = env.properties.get(env.auction_property_id)
+    player = env.players[pid]
+    if prop is None:
+        return None
+
+    color = prop.color
+    group = COLOR_GROUPS.get(color, [])
+    completes_monopoly = bool(group) and (
+        sum(1 for s in group if env.properties[s].owner == pid) + 1 == len(group)
+    )
+    ceiling = prop.price * 1.75 if completes_monopoly else prop.price * 0.9
+
+    safety_buffer = 100
+    max_bid = min(ceiling, player.cash - safety_buffer)
+
+    if env.auction_high_bid >= max_bid:
+        return int(AuctionAction.PASS)
+
+    candidates = sorted(
+        (
+            (action, increment)
+            for action, increment in AUCTION_ACTION_TO_INCREMENT.items()
+            if int(action) in allowed and env.auction_high_bid + increment <= max_bid
+        ),
+        key=lambda pair: pair[1],
+    )
+    if not candidates:
+        return int(AuctionAction.PASS)
+    return int(candidates[0][0])
 
 
 def fixed_jail_decision(env, pid: int, allowed) -> Optional[int]:
@@ -310,6 +355,7 @@ class PPOAgent:
             self.fixed_action_mask[OFFSETS["buy_trade"]:OFFSETS["auction"]] = True
             self.fixed_action_mask[int(ActionType.PAY_BAIL)] = True
             self.fixed_action_mask[int(ActionType.USE_GOOJ_CARD)] = True
+            self.fixed_action_mask[OFFSETS["auction"]:OFFSETS["auction"] + 5] = True
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -363,6 +409,12 @@ class PPOAgent:
             jail_action = fixed_jail_decision(env, pid, allowed_actions)
             if jail_action is not None:
                 return jail_action, None, None, allowed_actions
+
+        # Hybrid: auction bidding (own bid-shading heuristic)
+        if self.hybrid:
+            auction_action = fixed_auction_decision(env, pid, allowed_actions)
+            if auction_action is not None:
+                return auction_action, None, None, allowed_actions
 
         # Filter out fixed-policy actions from neural net consideration
         nn_allowed = [a for a in allowed_actions if not self.fixed_action_mask[a]]
