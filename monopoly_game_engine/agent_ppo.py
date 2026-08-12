@@ -265,8 +265,10 @@ class PPOAgent:
         n_epochs: int = 4,
         batch_size: int = 64,
         hidden_dim: int = 256,
-        win_loss_bonus: float = 10.0,  # matches DDQN's paper constant c=10 — was 1.0,
-        # too weak vs the dense potential-shaping reward to make winning matter
+        win_loss_bonus: float = 1.0,  # tried 10.0 (DDQN's paper constant) — made it
+        # worse: near-0% win rate meant almost every episode ate a -10 terminal
+        # penalty, swamping the dense shaping signal (reward went negative and
+        # flat instead of trending up). Reverted to the empirically-better value.
         device: str = "auto",
     ):
         self.player_id = player_id
