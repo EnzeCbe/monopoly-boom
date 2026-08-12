@@ -132,6 +132,16 @@ def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
     return None
 
 
+def fixed_jail_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own heuristic, matching Builder's/DealMaker's shared jail trait (both
+    never pay bail): use a Get-Out-Of-Jail-Free card if held (free, no
+    downside), otherwise decline to pay and let the roll-for-doubles /
+    wait-it-out path run — cash stays available for building/trading."""
+    if int(ActionType.USE_GOOJ_CARD) in allowed:
+        return int(ActionType.USE_GOOJ_CARD)
+    return None
+
+
 def fixed_trade_offer_decision(env, pid: int, allowed) -> Optional[int]:
     """Own trade-initiation heuristic, mixing Builder's + DealMaker's core
     trade traits (both are our own fixed agents — no ASU constraint):
@@ -296,6 +306,8 @@ class PPOAgent:
             self.fixed_action_mask[int(ActionType.ACCEPT_TRADE)] = True
             self.fixed_action_mask[OFFSETS["improve_house"]:OFFSETS["sell_house"]] = True
             self.fixed_action_mask[OFFSETS["buy_trade"]:OFFSETS["auction"]] = True
+            self.fixed_action_mask[int(ActionType.PAY_BAIL)] = True
+            self.fixed_action_mask[int(ActionType.USE_GOOJ_CARD)] = True
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -343,6 +355,12 @@ class PPOAgent:
             offer_action = fixed_trade_offer_decision(env, pid, allowed_actions)
             if offer_action is not None:
                 return offer_action, None, None, allowed_actions
+
+        # Hybrid: jail timing (GOOJ card if held, never pay bail)
+        if self.hybrid:
+            jail_action = fixed_jail_decision(env, pid, allowed_actions)
+            if jail_action is not None:
+                return jail_action, None, None, allowed_actions
 
         # Filter out fixed-policy actions from neural net consideration
         nn_allowed = [a for a in allowed_actions if not self.fixed_action_mask[a]]

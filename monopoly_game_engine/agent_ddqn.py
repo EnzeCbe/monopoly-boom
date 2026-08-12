@@ -28,6 +28,7 @@ from .agent_ppo import (
     fixed_accept_trade_decision,
     fixed_build_decision,
     fixed_buy_decision,
+    fixed_jail_decision,
     fixed_trade_offer_decision,
 )
 from .state import STATE_DIM
@@ -174,6 +175,8 @@ class DDQNAgent:
             self.fixed_actions.update(
                 range(OFFSETS["buy_trade"], OFFSETS["auction"])
             )
+            self.fixed_actions.add(int(ActionType.PAY_BAIL))
+            self.fixed_actions.add(int(ActionType.USE_GOOJ_CARD))
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -210,6 +213,12 @@ class DDQNAgent:
             offer_action = fixed_trade_offer_decision(env, pid, allowed_actions)
             if offer_action is not None:
                 return offer_action, None
+
+        # Hybrid: jail timing (GOOJ card if held, never pay bail)
+        if self.hybrid:
+            jail_action = fixed_jail_decision(env, pid, allowed_actions)
+            if jail_action is not None:
+                return jail_action, None
 
         # NN actions only
         nn_allowed = [a for a in allowed_actions if a not in self.fixed_actions]

@@ -33,6 +33,7 @@ from monopoly_game_engine.agent_ppo import (
     fixed_accept_trade_decision,
     fixed_build_decision,
     fixed_buy_decision,
+    fixed_jail_decision,
     fixed_trade_offer_decision,
 )
 from monopoly_game_engine.agents_fixed import FP_AGENT_CLASSES
@@ -142,6 +143,9 @@ class PPOAdapter:
             offer_action = fixed_trade_offer_decision(env, player_id, legal)
             if offer_action is not None:
                 return ActionDecision(offer_action, time.perf_counter() - started)
+            jail_action = fixed_jail_decision(env, player_id, legal)
+            if jail_action is not None:
+                return ActionDecision(jail_action, time.perf_counter() - started)
 
         neural_legal = tuple(
             action
@@ -150,6 +154,7 @@ class PPOAdapter:
             or action not in (int(ActionType.BUY_PROPERTY), int(ActionType.ACCEPT_TRADE))
             and not (OFFSETS["improve_house"] <= action < OFFSETS["sell_house"])
             and not (OFFSETS["buy_trade"] <= action < OFFSETS["auction"])
+            and action not in (int(ActionType.PAY_BAIL), int(ActionType.USE_GOOJ_CARD))
         )
         if not neural_legal:
             raise RuntimeError("PPO baseline has no neural legal action")
