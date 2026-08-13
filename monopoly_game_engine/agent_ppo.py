@@ -183,7 +183,7 @@ def fixed_mortgage_decision(env, pid: int, allowed) -> Optional[int]:
     non-target property first, so building/trading capacity on real assets
     is preserved as long as possible."""
     player = env.players[pid]
-    if player.cash >= 200:
+    if player.cash >= 100:
         return None
     candidates = sorted(
         (
