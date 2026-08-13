@@ -44,6 +44,7 @@ from .actions import (
     AuctionAction,
 )
 from .agents_fixed import _buy_trade_action, _exchange_action, _sell_trade_action
+from .board_traffic import landing_relative
 from .constants import (
     COLOR_GROUPS,
     JAIL_BAIL,
@@ -76,10 +77,12 @@ def fixed_buy_decision(env, pid: int) -> bool:
         if owned + 1 == len(group):
             return True
 
-    # Orange squares (St. James/Tennessee/New York) sit 6-9 spaces past Jail,
-    # the most common post-bail dice roll — statistically the most-landed-on
-    # group on the board. Buy with a thinner cash buffer than usual.
-    buffer = 20 if color == "orange" else 100
+    # Exact landing-probability model (own Markov-chain implementation, see
+    # board_traffic.py) replaces the old orange-only special case: any
+    # square landed on more than average is worth a thinner cash buffer,
+    # scaled continuously instead of one hand-picked group getting a break.
+    relative = landing_relative(sq)
+    buffer = max(20, 100 / relative)
     return player.cash >= prop.price + buffer
 
 
