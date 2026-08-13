@@ -30,6 +30,7 @@ from .agent_ppo import (
     fixed_build_decision,
     fixed_buy_decision,
     fixed_jail_decision,
+    fixed_liquidation_decision,
     fixed_mortgage_decision,
     fixed_trade_offer_decision,
     fixed_unmortgage_decision,
@@ -186,6 +187,9 @@ class DDQNAgent:
             self.fixed_actions.update(
                 range(OFFSETS["mortgage"], OFFSETS["improve_house"])
             )
+            self.fixed_actions.update(
+                range(OFFSETS["sell_house"], OFFSETS["buy_trade"])
+            )
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -243,6 +247,12 @@ class DDQNAgent:
             unmort_action = fixed_unmortgage_decision(env, pid, allowed_actions)
             if unmort_action is not None:
                 return unmort_action, None
+
+        # Hybrid: last-resort liquidation (sell house/hotel/prop)
+        if self.hybrid:
+            liq_action = fixed_liquidation_decision(env, pid, allowed_actions)
+            if liq_action is not None:
+                return liq_action, None
 
         # NN actions only
         nn_allowed = [a for a in allowed_actions if a not in self.fixed_actions]

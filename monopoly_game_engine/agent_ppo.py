@@ -232,6 +232,52 @@ def fixed_unmortgage_decision(env, pid: int, allowed) -> Optional[int]:
     return None
 
 
+def fixed_liquidation_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own last-resort cash-raising heuristic. sell_house/sell_hotel are
+    legal during ordinary play too (voluntary downgrade), so this only acts
+    when actually under financial pressure — the debt-rescue menu
+    (env.debt_player == pid) or critically low cash — never sells buildings
+    just because it's legal. Order: sell a hotel/house on the cheapest
+    property first (raises cash while losing the least future rent
+    potential), then sell a property outright as the very last resort,
+    cheapest first."""
+    if env.debt_player != pid and env.players[pid].cash >= 50:
+        return None
+    for i, sq in enumerate(REAL_ESTATE_IDS):
+        prop = env.properties[sq]
+        if prop.owner != pid:
+            continue
+        action = OFFSETS["sell_hotel"] + i
+        if action in allowed:
+            return action
+    cheapest_house = sorted(
+        (
+            (i, sq)
+            for i, sq in enumerate(REAL_ESTATE_IDS)
+            if env.properties[sq].owner == pid and env.properties[sq].houses > 0
+        ),
+        key=lambda pair: env.properties[pair[1]].price,
+    )
+    for i, sq in cheapest_house:
+        action = OFFSETS["sell_house"] + i
+        if action in allowed:
+            return action
+
+    cheapest_prop = sorted(
+        (
+            (idx, sq)
+            for idx, sq in enumerate(PROPERTY_IDS)
+            if env.properties[sq].owner == pid
+        ),
+        key=lambda pair: env.properties[pair[1]].price,
+    )
+    for idx, sq in cheapest_prop:
+        action = OFFSETS["sell_prop"] + idx
+        if action in allowed:
+            return action
+    return None
+
+
 def fixed_jail_decision(env, pid: int, allowed) -> Optional[int]:
     """Own heuristic, matching Builder's/DealMaker's shared jail trait (both
     never pay bail): use a Get-Out-Of-Jail-Free card if held (free, no
@@ -413,6 +459,7 @@ class PPOAgent:
             self.fixed_action_mask[OFFSETS["auction"]:OFFSETS["auction"] + 5] = True
             self.fixed_action_mask[OFFSETS["mortgage"]:OFFSETS["unmortgage"]] = True
             self.fixed_action_mask[OFFSETS["unmortgage"]:OFFSETS["improve_house"]] = True
+            self.fixed_action_mask[OFFSETS["sell_house"]:OFFSETS["buy_trade"]] = True
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -481,6 +528,13 @@ class PPOAgent:
             unmort_action = fixed_unmortgage_decision(env, pid, allowed_actions)
             if unmort_action is not None:
                 return unmort_action, None, None, allowed_actions
+
+        # Hybrid: last-resort liquidation (sell house/hotel/prop) when
+        # actually under financial pressure — own heuristic
+        if self.hybrid:
+            liq_action = fixed_liquidation_decision(env, pid, allowed_actions)
+            if liq_action is not None:
+                return liq_action, None, None, allowed_actions
 
         # Filter out fixed-policy actions from neural net consideration
         nn_allowed = [a for a in allowed_actions if not self.fixed_action_mask[a]]
