@@ -77,6 +77,17 @@ def fixed_buy_decision(env, pid: int) -> bool:
         if owned + 1 == len(group):
             return True
 
+        # Denial: if any live opponent is one piece from completing this
+        # same group, buying denies them the monopoly outright — worth
+        # taking even on a thin margin, since letting a rival complete a
+        # monopoly is far costlier than the purchase price.
+        for rival in env.players:
+            if rival.player_id == pid or rival.bankrupt:
+                continue
+            rival_owned = sum(1 for s in group if env.properties[s].owner == rival.player_id)
+            if rival_owned + 1 == len(group):
+                return True
+
     # Exact landing-probability model (own Markov-chain implementation, see
     # board_traffic.py) replaces the old orange-only special case: any
     # square landed on more than average is worth a thinner cash buffer,
@@ -124,7 +135,12 @@ def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
     env's allowed-action list, so we only need to pick among what's legal.
     """
     player = env.players[pid]
-    build_floor = 100
+    # Endgame: cash held back for future turns is wasted if there are few
+    # turns left, and games that hit the round cap are scored on net worth
+    # — building converts cash into book value, so spend more freely once
+    # the game is nearly over.
+    rounds_left = env.max_rounds - env.round
+    build_floor = 20 if rounds_left <= 20 else 100
     for i, sq in enumerate(REAL_ESTATE_IDS):
         prop = env.properties[sq]
         if prop.owner != pid or not prop.is_monopoly:
