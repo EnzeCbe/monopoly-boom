@@ -77,6 +77,17 @@ def fixed_buy_decision(env, pid: int) -> bool:
         if owned + 1 == len(group):
             return True
 
+        # Denial: if any live opponent is one piece from completing this
+        # same group, buying denies them the monopoly outright — worth
+        # taking even on a thin margin, since letting a rival complete a
+        # monopoly is far costlier than the purchase price.
+        for rival in env.players:
+            if rival.player_id == pid or rival.bankrupt:
+                continue
+            rival_owned = sum(1 for s in group if env.properties[s].owner == rival.player_id)
+            if rival_owned + 1 == len(group):
+                return True
+
     # Exact landing-probability model (own Markov-chain implementation, see
     # board_traffic.py) replaces the old orange-only special case: any
     # square landed on more than average is worth a thinner cash buffer,
