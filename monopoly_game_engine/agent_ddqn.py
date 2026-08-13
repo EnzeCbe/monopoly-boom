@@ -33,6 +33,7 @@ from .agent_ppo import (
     fixed_jail_decision,
     fixed_liquidation_decision,
     fixed_mortgage_decision,
+    fixed_mortgage_to_build_decision,
     fixed_trade_offer_decision,
     fixed_unmortgage_decision,
 )
@@ -221,6 +222,12 @@ class DDQNAgent:
             build_action = fixed_build_decision(env, pid, allowed_actions)
             if build_action is not None:
                 return build_action, None
+
+        # Hybrid: mortgage junk to fund a house on a monopoly we hold
+        if self.hybrid:
+            fund_action = fixed_mortgage_to_build_decision(env, pid, allowed_actions)
+            if fund_action is not None:
+                return fund_action, None
 
         # Hybrid: intercept trade-offer initiation (Builder+DealMaker mix)
         if self.hybrid:

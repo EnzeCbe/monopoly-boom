@@ -214,6 +214,44 @@ def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
     return None
 
 
+def fixed_mortgage_to_build_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own targeted exception to "never voluntarily mortgage": raise cash
+    specifically to fund a house on a monopoly we already hold, by
+    mortgaging our cheapest-income-loss non-monopoly junk property first.
+    A mortgaged single loses a trickle of rent; a house on a completed
+    group returns several times its cost in book value and keeps
+    compounding. Only fires when we already have somewhere to build and
+    cash alone isn't quite enough — never touches a live (monopoly) group."""
+    player = env.players[pid]
+    buildable = [
+        prop for prop in player.properties
+        if prop.is_monopoly and prop.is_real_estate and prop.houses < 4 and not prop.mortgaged
+    ]
+    if not buildable or env.houses_available <= 0:
+        return None
+    cheapest_house = min(prop.data["house_price"] for prop in buildable)
+    if player.cash >= cheapest_house + 20:
+        return None  # building is already affordable on its own
+
+    candidates = sorted(
+        (
+            (sq, env.properties[sq])
+            for sq in PROPERTY_IDS
+            if env.properties[sq].owner == pid
+            and not env.properties[sq].mortgaged
+            and not env.properties[sq].is_monopoly
+            and env.properties[sq].houses == 0
+        ),
+        key=lambda pair: pair[1].price,
+    )
+    for sq, prop in candidates:
+        idx = PROPERTY_IDS.index(sq)
+        action = OFFSETS["mortgage"] + idx
+        if action in allowed:
+            return action
+    return None
+
+
 def fixed_auction_decision(env, pid: int, allowed) -> Optional[int]:
     """Own auction heuristic — deliberately smarter than the fixed agents'
     shared base-class logic (agents_fixed.py's _auction_action always jumps
@@ -616,6 +654,13 @@ class PPOAgent:
             build_action = fixed_build_decision(env, pid, allowed_actions)
             if build_action is not None:
                 return build_action, None, None, allowed_actions
+
+        # Hybrid: mortgage junk to fund a house on a monopoly we already
+        # hold (own targeted exception to "never voluntarily mortgage")
+        if self.hybrid:
+            fund_action = fixed_mortgage_to_build_decision(env, pid, allowed_actions)
+            if fund_action is not None:
+                return fund_action, None, None, allowed_actions
 
         # Hybrid: handle trade-offer initiation (Builder+DealMaker mix —
         # see fixed_trade_offer_decision docstring)
