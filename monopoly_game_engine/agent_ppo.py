@@ -135,7 +135,12 @@ def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
     env's allowed-action list, so we only need to pick among what's legal.
     """
     player = env.players[pid]
-    build_floor = 100
+    # Endgame: cash held back for future turns is wasted if there are few
+    # turns left, and games that hit the round cap are scored on net worth
+    # — building converts cash into book value, so spend more freely once
+    # the game is nearly over.
+    rounds_left = env.max_rounds - env.round
+    build_floor = 20 if rounds_left <= 20 else 100
     for i, sq in enumerate(REAL_ESTATE_IDS):
         prop = env.properties[sq]
         if prop.owner != pid or not prop.is_monopoly:
