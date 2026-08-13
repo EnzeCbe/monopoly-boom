@@ -207,7 +207,7 @@ def fixed_mortgage_decision(env, pid: int, allowed) -> Optional[int]:
     non-target property first, so building/trading capacity on real assets
     is preserved as long as possible."""
     player = env.players[pid]
-    if player.cash >= 100:
+    if env.debt_player != pid:
         return None
     candidates = sorted(
         (
@@ -265,7 +265,7 @@ def fixed_liquidation_decision(env, pid: int, allowed) -> Optional[int]:
     property first (raises cash while losing the least future rent
     potential), then sell a property outright as the very last resort,
     cheapest first."""
-    if env.debt_player != pid and env.players[pid].cash >= 50:
+    if env.debt_player != pid:
         return None
     for i, sq in enumerate(REAL_ESTATE_IDS):
         prop = env.properties[sq]
