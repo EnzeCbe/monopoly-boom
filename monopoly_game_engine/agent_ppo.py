@@ -44,7 +44,7 @@ from .actions import (
     AuctionAction,
 )
 from .agents_fixed import _buy_trade_action, _exchange_action, _sell_trade_action
-from .board_traffic import landing_relative
+from .board_traffic import landing_odds, landing_relative
 from .constants import (
     COLOR_GROUPS,
     JAIL_BAIL,
@@ -56,6 +56,45 @@ from .constants import (
 )
 from .networks import ActorNetwork, CriticNetwork
 from .state import STATE_DIM
+
+def _rent_gain_per_lap(env, owner_pid: int, sq: int) -> float:
+    """Expected rent per lap (~40 moves) an opponent would pay us if
+    ``owner_pid`` owned this square, landing-odds weighted and monopoly-
+    aware. Own implementation — consolidates what used to be several
+    separate ad-hoc multipliers (0.9x/1.75x auction ceilings, orange-only
+    buy buffer) into one consistent estimate, after seeing a competitor's
+    equivalent concept expressed the same way."""
+    prop = env.properties[sq]
+    color = prop.color
+    group = COLOR_GROUPS.get(color, [])
+    owner = env.players[owner_pid]
+    if color == "railroad":
+        count = owner.railroads_owned() + 1
+        rent = float(prop.data["rent"][min(count - 1, 3)])
+    elif color == "utility":
+        count = owner.utilities_owned() + 1
+        rent = 7.0 * (10.0 if count >= 2 else 4.0)
+    else:
+        completes = bool(group) and (
+            sum(1 for s in group if env.properties[s].owner == owner_pid) + 1 == len(group)
+        )
+        base = float(prop.data["rent"][0])
+        rent = base * 2.0 if completes else base
+    return landing_odds(sq) * rent * 40.0
+
+
+def _property_value(env, pid: int, sq: int) -> float:
+    """Value of acquiring this square: our own rent-gain-per-lap plus half
+    of what the best-placed live rival would gain if they got it instead
+    (denial)."""
+    my_gain = _rent_gain_per_lap(env, pid, sq)
+    denial = 0.0
+    for rival in env.players:
+        if rival.player_id == pid or rival.bankrupt:
+            continue
+        denial = max(denial, _rent_gain_per_lap(env, rival.player_id, sq))
+    return my_gain + 0.5 * denial
+
 
 # ── Hybrid fixed-policy decisions ─────────────────────────────────────────────
 
@@ -94,7 +133,14 @@ def fixed_buy_decision(env, pid: int) -> bool:
     # scaled continuously instead of one hand-picked group getting a break.
     relative = landing_relative(sq)
     buffer = max(20, 100 / relative)
-    return player.cash >= prop.price + buffer
+    if player.cash >= prop.price + buffer:
+        return True
+
+    # Consolidated value estimate (rent-gain-per-lap + denial): buy even
+    # below the usual buffer if the square is clearly worth it.
+    if player.can_afford(prop.price) and _property_value(env, pid, sq) > prop.price * 1.5:
+        return True
+    return False
 
 
 def fixed_accept_trade_decision(env, pid: int) -> bool:
