@@ -247,6 +247,41 @@ def fixed_auction_decision(env, pid: int, allowed) -> Optional[int]:
     return int(candidates[0][0])
 
 
+def fixed_bankruptcy_denial_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own edge case (spotted by studying a competitor's commit history, not
+    ASU): when we're in the debt-settlement menu and even fully liquidating
+    everything we own could not cover the debt, bankruptcy is mathematically
+    certain no matter what we do this turn. Mortgaging still hands the
+    mortgaged deed to the creditor at a favourable buy-back rate once we go
+    under; selling to the bank instead raises the identical cash but denies
+    the creditor that estate outright. When our fate is sealed, deny rather
+    than mortgage — largest book value first."""
+    if env.debt_player != pid:
+        return None
+    player = env.players[pid]
+    liquidatable = 0.0
+    for prop in player.properties:
+        if prop.houses > 0:
+            liquidatable += prop.houses * (prop.data.get("house_price", 0) // 2)
+        elif not prop.mortgaged:
+            liquidatable += prop.mortgage_v
+    if env.debt_amount <= player.cash + liquidatable:
+        return None
+    sells = sorted(
+        (
+            (idx, sq)
+            for idx, sq in enumerate(PROPERTY_IDS)
+            if env.properties[sq].owner == pid
+        ),
+        key=lambda pair: -env.properties[pair[1]].price,
+    )
+    for idx, sq in sells:
+        action = OFFSETS["sell_prop"] + idx
+        if action in allowed:
+            return action
+    return None
+
+
 def fixed_mortgage_decision(env, pid: int, allowed) -> Optional[int]:
     """Own cash-management heuristic (not from any fixed agent): mortgage a
     non-monopoly property when cash drops below a safety floor, cheapest
@@ -589,6 +624,13 @@ class PPOAgent:
             auction_action = fixed_auction_decision(env, pid, allowed_actions)
             if auction_action is not None:
                 return auction_action, None, None, allowed_actions
+
+        # Hybrid: certain-bankruptcy denial (sell to bank, never mortgage,
+        # when nothing we do this turn can avoid going under)
+        if self.hybrid:
+            deny_action = fixed_bankruptcy_denial_decision(env, pid, allowed_actions)
+            if deny_action is not None:
+                return deny_action, None, None, allowed_actions
 
         # Hybrid: mortgage / unmortgage cash management (own heuristics)
         if self.hybrid:

@@ -27,6 +27,7 @@ from .constants import RULESET_VERSION
 from .agent_ppo import (
     fixed_accept_trade_decision,
     fixed_auction_decision,
+    fixed_bankruptcy_denial_decision,
     fixed_build_decision,
     fixed_buy_decision,
     fixed_jail_decision,
@@ -238,6 +239,12 @@ class DDQNAgent:
             auction_action = fixed_auction_decision(env, pid, allowed_actions)
             if auction_action is not None:
                 return auction_action, None
+
+        # Hybrid: certain-bankruptcy denial (sell to bank, never mortgage)
+        if self.hybrid:
+            deny_action = fixed_bankruptcy_denial_decision(env, pid, allowed_actions)
+            if deny_action is not None:
+                return deny_action, None
 
         # Hybrid: mortgage / unmortgage cash management (own heuristics)
         if self.hybrid:
