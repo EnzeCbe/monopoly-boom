@@ -36,12 +36,20 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .actions import ACTION_SPACE_SIZE, OFFSETS, ActionType
+from .actions import (
+    ACTION_SPACE_SIZE,
+    AUCTION_ACTION_TO_INCREMENT,
+    OFFSETS,
+    ActionType,
+    AuctionAction,
+)
+from .agents_fixed import _buy_trade_action, _exchange_action, _sell_trade_action
 from .constants import (
     COLOR_GROUPS,
     JAIL_BAIL,
     NUM_PLAYERS,
     PROPERTY_IDS,
+    REAL_ESTATE_IDS,
     RULESET_VERSION,
     TRADE_CASH_LEVELS,
 )
@@ -68,7 +76,11 @@ def fixed_buy_decision(env, pid: int) -> bool:
         if owned + 1 == len(group):
             return True
 
-    return player.cash >= prop.price + 100
+    # Orange squares (St. James/Tennessee/New York) sit 6-9 spaces past Jail,
+    # the most common post-bail dice roll — statistically the most-landed-on
+    # group on the board. Buy with a thinner cash buffer than usual.
+    buffer = 20 if color == "orange" else 100
+    return player.cash >= prop.price + buffer
 
 
 def fixed_accept_trade_decision(env, pid: int) -> bool:
@@ -90,7 +102,257 @@ def fixed_accept_trade_decision(env, pid: int) -> bool:
                 return True
 
     nwo = offer.net_worth()
-    return nwo >= 0
+    if nwo < 0:
+        return False
+
+    # Cash-floor safety: a nominally fair/good deal that drains cash below
+    # a survivable buffer can still bankrupt us on the very next rent hit.
+    player = env.players[pid]
+    if player.cash - offer.cash_requested < 100:
+        return False
+
+    return True
+
+
+def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own build heuristic (not derived from any fixed agent's code): build
+    on any owned monopoly once cash allows, hotel-before-house, cheapest
+    group first. Even-building legality is already enforced upstream by
+    env's allowed-action list, so we only need to pick among what's legal.
+    """
+    player = env.players[pid]
+    build_floor = 100
+    for i, sq in enumerate(REAL_ESTATE_IDS):
+        prop = env.properties[sq]
+        if prop.owner != pid or not prop.is_monopoly:
+            continue
+        house_price = prop.data["house_price"]
+        if player.cash < house_price + build_floor:
+            continue
+        hotel_action = OFFSETS["improve_hotel"] + i
+        house_action = OFFSETS["improve_house"] + i
+        if hotel_action in allowed:
+            return hotel_action
+        if house_action in allowed:
+            return house_action
+    return None
+
+
+def fixed_auction_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own auction heuristic — deliberately smarter than the fixed agents'
+    shared base-class logic (agents_fixed.py's _auction_action always jumps
+    straight to the max legal increment when it wants the property, with no
+    price shading). We compute a value ceiling (higher for a monopoly-
+    completing piece) and bid the SMALLEST increment that keeps us above the
+    current high bid, up to that ceiling and a cash-safety floor — real bid
+    shading instead of always maxing out."""
+    prop = env.properties.get(env.auction_property_id)
+    player = env.players[pid]
+    if prop is None:
+        return None
+
+    color = prop.color
+    group = COLOR_GROUPS.get(color, [])
+    completes_monopoly = bool(group) and (
+        sum(1 for s in group if env.properties[s].owner == pid) + 1 == len(group)
+    )
+    ceiling = prop.price * 1.75 if completes_monopoly else prop.price * 0.9
+
+    safety_buffer = 100
+    max_bid = min(ceiling, player.cash - safety_buffer)
+
+    if env.auction_high_bid >= max_bid:
+        return int(AuctionAction.PASS)
+
+    candidates = sorted(
+        (
+            (action, increment)
+            for action, increment in AUCTION_ACTION_TO_INCREMENT.items()
+            if int(action) in allowed and env.auction_high_bid + increment <= max_bid
+        ),
+        key=lambda pair: pair[1],
+    )
+    if not candidates:
+        return int(AuctionAction.PASS)
+    return int(candidates[0][0])
+
+
+def fixed_mortgage_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own cash-management heuristic (not from any fixed agent): mortgage a
+    non-monopoly property when cash drops below a safety floor, cheapest
+    non-target property first, so building/trading capacity on real assets
+    is preserved as long as possible."""
+    player = env.players[pid]
+    if player.cash >= 200:
+        return None
+    candidates = sorted(
+        (
+            (sq, env.properties[sq])
+            for sq in PROPERTY_IDS
+            if env.properties[sq].owner == pid
+            and not env.properties[sq].mortgaged
+            and not env.properties[sq].is_monopoly
+            and env.properties[sq].houses == 0
+        ),
+        key=lambda pair: pair[1].price,
+    )
+    for sq, prop in candidates:
+        idx = PROPERTY_IDS.index(sq)
+        action = OFFSETS["mortgage"] + idx
+        if action in allowed:
+            return action
+    return None
+
+
+def fixed_unmortgage_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own heuristic: none of the fixed agents ever lift a mortgage, which
+    leaves rent income permanently off for those properties. Once cash is
+    comfortably above a buffer, pay off the cheapest mortgage first (lowest
+    cost to restore income) — a real edge over Builder/DealMaker, not a
+    copy of them."""
+    player = env.players[pid]
+    if player.cash < 500:
+        return None
+    candidates = sorted(
+        (
+            (sq, env.properties[sq])
+            for sq in PROPERTY_IDS
+            if env.properties[sq].owner == pid and env.properties[sq].mortgaged
+        ),
+        key=lambda pair: pair[1].mortgage_v,
+    )
+    for sq, prop in candidates:
+        cost = int(prop.mortgage_v * 1.1)
+        if player.cash - cost < 300:
+            continue
+        idx = PROPERTY_IDS.index(sq)
+        action = OFFSETS["unmortgage"] + idx
+        if action in allowed:
+            return action
+    return None
+
+
+def fixed_liquidation_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own last-resort cash-raising heuristic. sell_house/sell_hotel are
+    legal during ordinary play too (voluntary downgrade), so this only acts
+    when actually under financial pressure — the debt-rescue menu
+    (env.debt_player == pid) or critically low cash — never sells buildings
+    just because it's legal. Order: sell a hotel/house on the cheapest
+    property first (raises cash while losing the least future rent
+    potential), then sell a property outright as the very last resort,
+    cheapest first."""
+    if env.debt_player != pid and env.players[pid].cash >= 50:
+        return None
+    for i, sq in enumerate(REAL_ESTATE_IDS):
+        prop = env.properties[sq]
+        if prop.owner != pid:
+            continue
+        action = OFFSETS["sell_hotel"] + i
+        if action in allowed:
+            return action
+    cheapest_house = sorted(
+        (
+            (i, sq)
+            for i, sq in enumerate(REAL_ESTATE_IDS)
+            if env.properties[sq].owner == pid and env.properties[sq].houses > 0
+        ),
+        key=lambda pair: env.properties[pair[1]].price,
+    )
+    for i, sq in cheapest_house:
+        action = OFFSETS["sell_house"] + i
+        if action in allowed:
+            return action
+
+    cheapest_prop = sorted(
+        (
+            (idx, sq)
+            for idx, sq in enumerate(PROPERTY_IDS)
+            if env.properties[sq].owner == pid
+        ),
+        key=lambda pair: env.properties[pair[1]].price,
+    )
+    for idx, sq in cheapest_prop:
+        action = OFFSETS["sell_prop"] + idx
+        if action in allowed:
+            return action
+    return None
+
+
+def fixed_jail_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own heuristic, matching Builder's/DealMaker's shared jail trait (both
+    never pay bail): use a Get-Out-Of-Jail-Free card if held (free, no
+    downside), otherwise decline to pay and let the roll-for-doubles /
+    wait-it-out path run — cash stays available for building/trading."""
+    if int(ActionType.USE_GOOJ_CARD) in allowed:
+        return int(ActionType.USE_GOOJ_CARD)
+    return None
+
+
+def fixed_trade_offer_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own trade-initiation heuristic, mixing Builder's + DealMaker's core
+    trade traits (both are our own fixed agents — no ASU constraint):
+    bargain buy-offer for a one-piece-from-monopoly colour group, exchange
+    a non-monopoly prop for a needed piece, or sell spare non-monopoly
+    props at a premium. Returns None if nothing worthwhile is legal right
+    now (the neural net picks something else that turn).
+    """
+    others = [
+        i for i in range(NUM_PLAYERS) if i != pid and not env.players[i].bankrupt
+    ]
+    if not others:
+        return None
+
+    # 1. Bargain buy-offer (0.75x) for a colour group we're one piece from completing
+    for color, group in COLOR_GROUPS.items():
+        if color in ("railroad", "utility"):
+            continue
+        owned = [s for s in group if env.properties[s].owner == pid]
+        need = [
+            s
+            for s in group
+            if env.properties[s].owner not in (pid, None)
+            and not env.players[env.properties[s].owner].bankrupt
+        ]
+        if len(owned) + 1 == len(group) and need:
+            sq = need[0]
+            target = env.properties[sq].owner
+            action = _buy_trade_action(pid, target, sq, 0, env, allowed)
+            if action is not None:
+                return action
+
+    # 2. Exchange a non-monopoly prop of ours for a needed piece
+    for color, group in COLOR_GROUPS.items():
+        if color in ("railroad", "utility"):
+            continue
+        owned_here = [s for s in group if env.properties[s].owner == pid]
+        if not owned_here:
+            continue
+        need = [
+            s
+            for s in group
+            if env.properties[s].owner not in (pid, None)
+            and not env.players[env.properties[s].owner].bankrupt
+        ]
+        for req_sq in need:
+            target = env.properties[req_sq].owner
+            for offer_sq in owned_here:
+                if env.properties[offer_sq].is_monopoly:
+                    continue
+                action = _exchange_action(pid, target, offer_sq, req_sq, env, allowed)
+                if action is not None:
+                    return action
+
+    # 3. Sell spare non-monopoly, unbuilt props at a premium (1.25x)
+    for sq in PROPERTY_IDS:
+        prop = env.properties[sq]
+        if prop.owner != pid or prop.is_monopoly or prop.houses > 0:
+            continue
+        for target in others:
+            action = _sell_trade_action(pid, target, sq, 2, env, allowed)
+            if action is not None:
+                return action
+
+    return None
 
 
 # ── Experience buffer ─────────────────────────────────────────────────────────
@@ -149,7 +411,10 @@ class PPOAgent:
         n_epochs: int = 4,
         batch_size: int = 64,
         hidden_dim: int = 256,
-        win_loss_bonus: float = 1.0,
+        win_loss_bonus: float = 1.0,  # tried 10.0 (DDQN's paper constant) — made it
+        # worse: near-0% win rate meant almost every episode ate a -10 terminal
+        # penalty, swamping the dense shaping signal (reward went negative and
+        # flat instead of trending up). Reverted to the empirically-better value.
         device: str = "auto",
     ):
         self.player_id = player_id
@@ -187,6 +452,14 @@ class PPOAgent:
         if hybrid:
             self.fixed_action_mask[int(ActionType.BUY_PROPERTY)] = True
             self.fixed_action_mask[int(ActionType.ACCEPT_TRADE)] = True
+            self.fixed_action_mask[OFFSETS["improve_house"]:OFFSETS["sell_house"]] = True
+            self.fixed_action_mask[OFFSETS["buy_trade"]:OFFSETS["auction"]] = True
+            self.fixed_action_mask[int(ActionType.PAY_BAIL)] = True
+            self.fixed_action_mask[int(ActionType.USE_GOOJ_CARD)] = True
+            self.fixed_action_mask[OFFSETS["auction"]:OFFSETS["auction"] + 5] = True
+            self.fixed_action_mask[OFFSETS["mortgage"]:OFFSETS["unmortgage"]] = True
+            self.fixed_action_mask[OFFSETS["unmortgage"]:OFFSETS["improve_house"]] = True
+            self.fixed_action_mask[OFFSETS["sell_house"]:OFFSETS["buy_trade"]] = True
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -220,6 +493,48 @@ class PPOAgent:
                     return int(ActionType.ACCEPT_TRADE), None, None, allowed_actions
                 else:
                     return int(ActionType.DECLINE_TRADE), None, None, allowed_actions
+
+        # Hybrid: handle building (Builder-inspired, own heuristic — see
+        # fixed_build_decision docstring)
+        if self.hybrid:
+            build_action = fixed_build_decision(env, pid, allowed_actions)
+            if build_action is not None:
+                return build_action, None, None, allowed_actions
+
+        # Hybrid: handle trade-offer initiation (Builder+DealMaker mix —
+        # see fixed_trade_offer_decision docstring)
+        if self.hybrid:
+            offer_action = fixed_trade_offer_decision(env, pid, allowed_actions)
+            if offer_action is not None:
+                return offer_action, None, None, allowed_actions
+
+        # Hybrid: jail timing (GOOJ card if held, never pay bail)
+        if self.hybrid:
+            jail_action = fixed_jail_decision(env, pid, allowed_actions)
+            if jail_action is not None:
+                return jail_action, None, None, allowed_actions
+
+        # Hybrid: auction bidding (own bid-shading heuristic)
+        if self.hybrid:
+            auction_action = fixed_auction_decision(env, pid, allowed_actions)
+            if auction_action is not None:
+                return auction_action, None, None, allowed_actions
+
+        # Hybrid: mortgage / unmortgage cash management (own heuristics)
+        if self.hybrid:
+            mort_action = fixed_mortgage_decision(env, pid, allowed_actions)
+            if mort_action is not None:
+                return mort_action, None, None, allowed_actions
+            unmort_action = fixed_unmortgage_decision(env, pid, allowed_actions)
+            if unmort_action is not None:
+                return unmort_action, None, None, allowed_actions
+
+        # Hybrid: last-resort liquidation (sell house/hotel/prop) when
+        # actually under financial pressure — own heuristic
+        if self.hybrid:
+            liq_action = fixed_liquidation_decision(env, pid, allowed_actions)
+            if liq_action is not None:
+                return liq_action, None, None, allowed_actions
 
         # Filter out fixed-policy actions from neural net consideration
         nn_allowed = [a for a in allowed_actions if not self.fixed_action_mask[a]]

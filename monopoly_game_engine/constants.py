@@ -136,6 +136,11 @@ AUCTION_BID_INCREMENTS = (1, 10, 50, 100)
 NUM_PLAYERS = 4 # Work To Do Here
 RULESET_VERSION = "ppo-plus-v2"
 
+# Reward-shaping weight for the liquidity-risk penalty in _compute_reward.
+# Own formula (top-3-of-next-11-squares rent exposure vs. cash + half
+# unmortgaged deed value) — not derived from ASU_FROZEN_TEACHER.
+LIQUIDITY_RISK_WEIGHT = 0.15
+
 
 CHANCE_CARDS = [
     "Advance to Go (Collect $200)",

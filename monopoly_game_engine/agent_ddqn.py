@@ -24,7 +24,17 @@ import torch.optim as optim
 from .networks import DDQNNetwork
 from .actions import ACTION_SPACE_SIZE, OFFSETS, ActionType
 from .constants import RULESET_VERSION
-from .agent_ppo import fixed_buy_decision, fixed_accept_trade_decision
+from .agent_ppo import (
+    fixed_accept_trade_decision,
+    fixed_auction_decision,
+    fixed_build_decision,
+    fixed_buy_decision,
+    fixed_jail_decision,
+    fixed_liquidation_decision,
+    fixed_mortgage_decision,
+    fixed_trade_offer_decision,
+    fixed_unmortgage_decision,
+)
 from .state import STATE_DIM
 
 
@@ -163,6 +173,23 @@ class DDQNAgent:
         if hybrid:
             self.fixed_actions.add(int(ActionType.BUY_PROPERTY))
             self.fixed_actions.add(int(ActionType.ACCEPT_TRADE))
+            self.fixed_actions.update(
+                range(OFFSETS["improve_house"], OFFSETS["sell_house"])
+            )
+            self.fixed_actions.update(
+                range(OFFSETS["buy_trade"], OFFSETS["auction"])
+            )
+            self.fixed_actions.add(int(ActionType.PAY_BAIL))
+            self.fixed_actions.add(int(ActionType.USE_GOOJ_CARD))
+            self.fixed_actions.update(
+                range(OFFSETS["auction"], OFFSETS["auction"] + 5)
+            )
+            self.fixed_actions.update(
+                range(OFFSETS["mortgage"], OFFSETS["improve_house"])
+            )
+            self.fixed_actions.update(
+                range(OFFSETS["sell_house"], OFFSETS["buy_trade"])
+            )
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -187,6 +214,45 @@ class DDQNAgent:
                 if fixed_accept_trade_decision(env, pid):
                     return int(ActionType.ACCEPT_TRADE), None
                 return int(ActionType.DECLINE_TRADE), None
+
+        # Hybrid: intercept building (Builder-inspired, own heuristic)
+        if self.hybrid:
+            build_action = fixed_build_decision(env, pid, allowed_actions)
+            if build_action is not None:
+                return build_action, None
+
+        # Hybrid: intercept trade-offer initiation (Builder+DealMaker mix)
+        if self.hybrid:
+            offer_action = fixed_trade_offer_decision(env, pid, allowed_actions)
+            if offer_action is not None:
+                return offer_action, None
+
+        # Hybrid: jail timing (GOOJ card if held, never pay bail)
+        if self.hybrid:
+            jail_action = fixed_jail_decision(env, pid, allowed_actions)
+            if jail_action is not None:
+                return jail_action, None
+
+        # Hybrid: auction bidding (own bid-shading heuristic)
+        if self.hybrid:
+            auction_action = fixed_auction_decision(env, pid, allowed_actions)
+            if auction_action is not None:
+                return auction_action, None
+
+        # Hybrid: mortgage / unmortgage cash management (own heuristics)
+        if self.hybrid:
+            mort_action = fixed_mortgage_decision(env, pid, allowed_actions)
+            if mort_action is not None:
+                return mort_action, None
+            unmort_action = fixed_unmortgage_decision(env, pid, allowed_actions)
+            if unmort_action is not None:
+                return unmort_action, None
+
+        # Hybrid: last-resort liquidation (sell house/hotel/prop)
+        if self.hybrid:
+            liq_action = fixed_liquidation_decision(env, pid, allowed_actions)
+            if liq_action is not None:
+                return liq_action, None
 
         # NN actions only
         nn_allowed = [a for a in allowed_actions if a not in self.fixed_actions]
