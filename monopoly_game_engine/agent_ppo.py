@@ -127,12 +127,23 @@ def fixed_buy_decision(env, pid: int) -> bool:
             if rival_owned + 1 == len(group):
                 return True
 
+    # Protect the empire: a competitor's own diagnostic found 19 bankruptcies
+    # in 32 games, each one handing a rival our whole estate, traced to
+    # spending as aggressively after owning a monopoly as before it. Before
+    # we hold one there's little to protect and speed matters; once we do,
+    # staying solvent to develop it outranks grabbing one more square.
+    owns_monopoly = any(
+        p.is_monopoly and p.color not in ("railroad", "utility")
+        for p in player.properties
+    )
+    reserve = 400 if owns_monopoly else 0
+
     # Exact landing-probability model (own Markov-chain implementation, see
     # board_traffic.py) replaces the old orange-only special case: any
     # square landed on more than average is worth a thinner cash buffer,
     # scaled continuously instead of one hand-picked group getting a break.
     relative = landing_relative(sq)
-    buffer = max(20, 100 / relative)
+    buffer = max(20, 100 / relative) + reserve
     if player.cash >= prop.price + buffer:
         return True
 
