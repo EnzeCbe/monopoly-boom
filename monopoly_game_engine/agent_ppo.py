@@ -156,7 +156,12 @@ def fixed_auction_decision(env, pid: int, allowed) -> Optional[int]:
     completes_monopoly = bool(group) and (
         sum(1 for s in group if env.properties[s].owner == pid) + 1 == len(group)
     )
-    ceiling = prop.price * 1.75 if completes_monopoly else prop.price * 0.9
+    # More live rivals still on the board means more potential rent payers
+    # landing on this square over the rest of the game, so it's worth more
+    # than list price even outside a monopoly play.
+    rivals = sum(1 for p in env.players if p.player_id != pid and not p.bankrupt)
+    rival_scale = 0.9 + 0.05 * max(0, rivals - 1)
+    ceiling = prop.price * 1.75 if completes_monopoly else prop.price * rival_scale
 
     safety_buffer = 100
     max_bid = min(ceiling, player.cash - safety_buffer)
@@ -183,7 +188,7 @@ def fixed_mortgage_decision(env, pid: int, allowed) -> Optional[int]:
     non-target property first, so building/trading capacity on real assets
     is preserved as long as possible."""
     player = env.players[pid]
-    if player.cash >= 200:
+    if player.cash >= 100:
         return None
     candidates = sorted(
         (

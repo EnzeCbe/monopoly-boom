@@ -58,6 +58,11 @@ class ActorNetwork(nn.Module):
             _mlp_block(hidden_dim, hidden_dim),
             nn.Linear(hidden_dim, ACTION_SPACE_SIZE),
         )
+        # Own RNG for action sampling — never touches the global torch RNG
+        # stream (competition submission rule: seeding must stay local, a
+        # submission that advances the global stream breaks seed-pairing
+        # across seats). Auto-seeded from OS entropy at construction.
+        self._rng = torch.Generator()
 
     def forward(self, state: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         """
@@ -93,7 +98,9 @@ class ActorNetwork(nn.Module):
                 "ActorNetwork produced an invalid action distribution; "
                 "check PPO updates for NaNs/Infs"
             )
-        action = torch.multinomial(probs, 1).item()
+        # multinomial's generator arg must share device with probs; our own
+        # RNG lives on CPU, so sample there and move the single index back.
+        action = torch.multinomial(probs.cpu(), 1, generator=self._rng).item()
         log_prob = log_probs[0, action].item()
         return action, log_prob
 
