@@ -177,6 +177,61 @@ def fixed_auction_decision(env, pid: int, allowed) -> Optional[int]:
     return int(candidates[0][0])
 
 
+def fixed_mortgage_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own cash-management heuristic (not from any fixed agent): mortgage a
+    non-monopoly property when cash drops below a safety floor, cheapest
+    non-target property first, so building/trading capacity on real assets
+    is preserved as long as possible."""
+    player = env.players[pid]
+    if player.cash >= 200:
+        return None
+    candidates = sorted(
+        (
+            (sq, env.properties[sq])
+            for sq in PROPERTY_IDS
+            if env.properties[sq].owner == pid
+            and not env.properties[sq].mortgaged
+            and not env.properties[sq].is_monopoly
+            and env.properties[sq].houses == 0
+        ),
+        key=lambda pair: pair[1].price,
+    )
+    for sq, prop in candidates:
+        idx = PROPERTY_IDS.index(sq)
+        action = OFFSETS["mortgage"] + idx
+        if action in allowed:
+            return action
+    return None
+
+
+def fixed_unmortgage_decision(env, pid: int, allowed) -> Optional[int]:
+    """Own heuristic: none of the fixed agents ever lift a mortgage, which
+    leaves rent income permanently off for those properties. Once cash is
+    comfortably above a buffer, pay off the cheapest mortgage first (lowest
+    cost to restore income) — a real edge over Builder/DealMaker, not a
+    copy of them."""
+    player = env.players[pid]
+    if player.cash < 500:
+        return None
+    candidates = sorted(
+        (
+            (sq, env.properties[sq])
+            for sq in PROPERTY_IDS
+            if env.properties[sq].owner == pid and env.properties[sq].mortgaged
+        ),
+        key=lambda pair: pair[1].mortgage_v,
+    )
+    for sq, prop in candidates:
+        cost = int(prop.mortgage_v * 1.1)
+        if player.cash - cost < 300:
+            continue
+        idx = PROPERTY_IDS.index(sq)
+        action = OFFSETS["unmortgage"] + idx
+        if action in allowed:
+            return action
+    return None
+
+
 def fixed_jail_decision(env, pid: int, allowed) -> Optional[int]:
     """Own heuristic, matching Builder's/DealMaker's shared jail trait (both
     never pay bail): use a Get-Out-Of-Jail-Free card if held (free, no
@@ -356,6 +411,8 @@ class PPOAgent:
             self.fixed_action_mask[int(ActionType.PAY_BAIL)] = True
             self.fixed_action_mask[int(ActionType.USE_GOOJ_CARD)] = True
             self.fixed_action_mask[OFFSETS["auction"]:OFFSETS["auction"] + 5] = True
+            self.fixed_action_mask[OFFSETS["mortgage"]:OFFSETS["unmortgage"]] = True
+            self.fixed_action_mask[OFFSETS["unmortgage"]:OFFSETS["improve_house"]] = True
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -415,6 +472,15 @@ class PPOAgent:
             auction_action = fixed_auction_decision(env, pid, allowed_actions)
             if auction_action is not None:
                 return auction_action, None, None, allowed_actions
+
+        # Hybrid: mortgage / unmortgage cash management (own heuristics)
+        if self.hybrid:
+            mort_action = fixed_mortgage_decision(env, pid, allowed_actions)
+            if mort_action is not None:
+                return mort_action, None, None, allowed_actions
+            unmort_action = fixed_unmortgage_decision(env, pid, allowed_actions)
+            if unmort_action is not None:
+                return unmort_action, None, None, allowed_actions
 
         # Filter out fixed-policy actions from neural net consideration
         nn_allowed = [a for a in allowed_actions if not self.fixed_action_mask[a]]

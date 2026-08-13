@@ -30,7 +30,9 @@ from .agent_ppo import (
     fixed_build_decision,
     fixed_buy_decision,
     fixed_jail_decision,
+    fixed_mortgage_decision,
     fixed_trade_offer_decision,
+    fixed_unmortgage_decision,
 )
 from .state import STATE_DIM
 
@@ -181,6 +183,9 @@ class DDQNAgent:
             self.fixed_actions.update(
                 range(OFFSETS["auction"], OFFSETS["auction"] + 5)
             )
+            self.fixed_actions.update(
+                range(OFFSETS["mortgage"], OFFSETS["improve_house"])
+            )
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -229,6 +234,15 @@ class DDQNAgent:
             auction_action = fixed_auction_decision(env, pid, allowed_actions)
             if auction_action is not None:
                 return auction_action, None
+
+        # Hybrid: mortgage / unmortgage cash management (own heuristics)
+        if self.hybrid:
+            mort_action = fixed_mortgage_decision(env, pid, allowed_actions)
+            if mort_action is not None:
+                return mort_action, None
+            unmort_action = fixed_unmortgage_decision(env, pid, allowed_actions)
+            if unmort_action is not None:
+                return unmort_action, None
 
         # NN actions only
         nn_allowed = [a for a in allowed_actions if a not in self.fixed_actions]
