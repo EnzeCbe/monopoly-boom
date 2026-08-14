@@ -23,7 +23,14 @@ from typing import Any, Sequence
 
 _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+    # Append, never prepend. A competitor's commit history documented the
+    # failure mode this avoids: if the harness process already has its own
+    # canonical monopoly_game_engine importable (e.g. to actually run the
+    # match), prepending our copy would win the name and silently swap in
+    # our engine code for the whole table's simulation, not just our own
+    # decisions. Appending means the harness's copy wins whenever one
+    # exists, and ours only fills in if genuinely missing.
+    sys.path.append(str(_ROOT))
 
 from monopoly_game_engine.agent_ppo import PPOAgent  # noqa: E402
 from monopoly_game_engine.state import STATE_DIM  # noqa: E402
