@@ -44,7 +44,7 @@ from .actions import (
     AuctionAction,
 )
 from .agents_fixed import _buy_trade_action, _exchange_action, _sell_trade_action
-from .board_traffic import landing_odds, landing_relative
+from .board_traffic import landing_odds
 from .constants import (
     COLOR_GROUPS,
     JAIL_BAIL,
@@ -127,24 +127,16 @@ def fixed_buy_decision(env, pid: int) -> bool:
             if rival_owned + 1 == len(group):
                 return True
 
-    # Protect the empire: a competitor's own diagnostic found 19 bankruptcies
-    # in 32 games, each one handing a rival our whole estate, traced to
-    # spending as aggressively after owning a monopoly as before it. Before
-    # we hold one there's little to protect and speed matters; once we do,
-    # staying solvent to develop it outranks grabbing one more square.
-    owns_monopoly = any(
-        p.is_monopoly and p.color not in ("railroad", "utility")
-        for p in player.properties
-    )
-    reserve = 400 if owns_monopoly else 0
-
-    # Exact landing-probability model (own Markov-chain implementation, see
-    # board_traffic.py) replaces the old orange-only special case: any
-    # square landed on more than average is worth a thinner cash buffer,
-    # scaled continuously instead of one hand-picked group getting a break.
-    relative = landing_relative(sq)
-    buffer = max(20, 100 / relative) + reserve
-    if player.cash >= prop.price + buffer:
+    # No cash reserve: a competitor's rigorously measured finding (+11.6pp,
+    # p<0.0001, 2000 paired games across two opponent fields) is that
+    # holding back cash is a losing trade in this engine specifically,
+    # because running low on cash never bankrupts anyone directly — the
+    # debt-rescue menu and forced liquidation absorb it. Mortgaging to raise
+    # $1 destroys 2.5 book value for a $1 return, i.e. being short costs
+    # 1.5x per dollar with certainty, which is exactly what a deed *gains*
+    # per dollar right now. A buffer pays a certain 1.5x to avoid a
+    # probabilistic risk. Buy on affordability alone.
+    if player.can_afford(prop.price):
         return True
 
     # Consolidated value estimate (rent-gain-per-lap + denial): buy even
