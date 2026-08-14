@@ -190,6 +190,7 @@ def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
     # the game is nearly over.
     rounds_left = env.max_rounds - env.round
     build_floor = 20 if rounds_left <= 20 else 100
+    candidates = []
     for i, sq in enumerate(REAL_ESTATE_IDS):
         prop = env.properties[sq]
         if prop.owner != pid or not prop.is_monopoly:
@@ -200,10 +201,23 @@ def fixed_build_decision(env, pid: int, allowed) -> Optional[int]:
         hotel_action = OFFSETS["improve_hotel"] + i
         house_action = OFFSETS["improve_house"] + i
         if hotel_action in allowed:
-            return hotel_action
-        if house_action in allowed:
-            return house_action
-    return None
+            action = hotel_action
+        elif house_action in allowed:
+            action = house_action
+        else:
+            continue
+        # Prioritise by expected rent gained per dollar spent (landing-odds
+        # weighted), not fixed board order — own implementation, inspired by
+        # seeing a competitor's analysis that the 2->3 house step returns
+        # ~3.5x per dollar, far above other increments, on this board.
+        next_level = min(prop.houses + 1, 5)
+        rent_gain = prop.data["rent"][next_level] - prop.data["rent"][prop.houses]
+        efficiency = landing_odds(sq) * rent_gain / house_price
+        candidates.append((efficiency, action))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: -pair[0])
+    return candidates[0][1]
 
 
 def fixed_mortgage_to_build_decision(env, pid: int, allowed) -> Optional[int]:
