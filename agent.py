@@ -94,9 +94,22 @@ class Agent:
                 player_id = int(kwargs[key])
                 break
         self.player_id = int(player_id)
-        self._agent = PPOAgent(player_id=self.player_id, hybrid=True)
+        # PPOAgent.load() checks the checkpoint's stored player_id against
+        # the constructing agent's player_id and raises on mismatch. Our
+        # checkpoint was always trained as seat 0 (train.py always trains
+        # the learner in seat 0 of a self-play env; the *state* vector is
+        # what's actually seat-normalized). So the checkpoint always says
+        # player_id=0, regardless of which seat we're really playing. If a
+        # harness ever seats us anywhere but 0, constructing PPOAgent with
+        # our real seat directly would make load() raise on every non-zero
+        # seat. Load as seat 0 to satisfy the check, then repoint the
+        # internal agent at our real seat so the hybrid heuristics (which
+        # read env.players[pid]) look at the right player. Never touches
+        # network weights, since load() only reassigns state dicts.
+        self._agent = PPOAgent(player_id=0, hybrid=True)
         if _MODEL_PATH.exists():
             self._agent.load(str(_MODEL_PATH))
+        self._agent.player_id = self.player_id
         if hasattr(self._agent, "epsilon"):
             self._agent.epsilon = 0.0
 
