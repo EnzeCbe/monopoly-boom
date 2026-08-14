@@ -65,10 +65,14 @@ def _resolve(args: Sequence[Any], kwargs: dict) -> tuple:
     state = kwargs.get("state")
     allowed = kwargs.get("allowed_actions")
     env = kwargs.get("env")
-    player_id = kwargs.get("player_id")
+    player_id = None
+    for key in ("player_id", "pid", "agent_id", "seat"):
+        if kwargs.get(key) is not None:
+            player_id = int(kwargs[key])
+            break
 
-    candidates = list(args) + [v for k, v in kwargs.items() if k not in
-                                ("state", "allowed_actions", "env", "player_id")]
+    consumed_keys = ("state", "allowed_actions", "env", "player_id", "pid", "agent_id", "seat")
+    candidates = list(args) + [v for k, v in kwargs.items() if k not in consumed_keys]
     for value in candidates:
         if value is None:
             continue
