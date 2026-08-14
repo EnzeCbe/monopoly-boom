@@ -275,7 +275,20 @@ def fixed_auction_decision(env, pid: int, allowed) -> Optional[int]:
     # than list price even outside a monopoly play.
     rivals = sum(1 for p in env.players if p.player_id != pid and not p.bankrupt)
     rival_scale = 0.9 + 0.05 * max(0, rivals - 1)
-    ceiling = prop.price * 1.75 if completes_monopoly else prop.price * rival_scale
+    if completes_monopoly:
+        # Exact book-value jump from state.py's own net-worth formula
+        # (verified: unmortgaged deed = 2.5x price, deed in a complete
+        # group = 5.0x price — every deed we already hold in this group
+        # re-prices on completion, not just the new one). A flat 1.75x
+        # ceiling was leaving real value on the table.
+        owned_prices = sum(
+            env.properties[s].price for s in group if env.properties[s].owner == pid
+        )
+        group_total = sum(env.properties[s].price for s in group)
+        book_gain = 5.0 * group_total - 2.5 * owned_prices
+        ceiling = min(book_gain, prop.price * 10.0)
+    else:
+        ceiling = prop.price * rival_scale
 
     safety_buffer = 100
     max_bid = min(ceiling, player.cash - safety_buffer)
